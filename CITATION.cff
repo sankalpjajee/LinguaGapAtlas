@@ -1,0 +1,35 @@
+# Citation File Format (CFF) 1.2.0 metadata for the corpus artifact
+# accompanying the paper "LinguaGapAtlas" (earlier title: "Quantifying the Gaps").
+# At release time: fill in the version actually released, its release date,
+# and the DOI once one is minted (e.g. via the repository's archive release).
+cff-version: 1.2.0
+message: "If you use this corpus, please cite the paper and this artifact."
+title: "LinguaGapAtlas: A Corpus and Taxonomy of 96 Multilingual AI Benchmarks and Datasets"
+type: dataset
+authors:
+  - family-names: Jajee
+    given-names: Sankalp K.
+    orcid: "https://orcid.org/0009-0003-8597-9042"
+  - family-names: Shaw
+    given-names: Tanisha
+  - family-names: Soni
+    given-names: Vatsalya
+abstract: >-
+  Structured corpus of 96 multilingual AI resources (65 benchmarks and 31
+  datasets, 2018-2025) classified on five taxonomy dimensions - data origin,
+  linguistic resource tier, task class, cultural specificity, and inference
+  paradigm - with per-resource provenance, the 142-candidate screening log,
+  the annotation codebook, and scripts that recompute the paper's headline
+  statistics and inter-annotator agreement.
+keywords:
+  - multilingual AI
+  - benchmarks
+  - datasets
+  - bias
+  - evaluation
+  - taxonomy
+  - fairness
+license: CC-BY-4.0
+version: 1.0.0
+# date-released: YYYY-MM-DD   # set at release
+# doi: 10.5281/zenodo.XXXXXXX  # set once minted; do not guess
