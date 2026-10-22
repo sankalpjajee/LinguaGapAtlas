@@ -1,0 +1,685 @@
+{
+  "@context": {
+    "@language": "en",
+    "@vocab": "https://schema.org/",
+    "citeAs": "cr:citeAs",
+    "column": "cr:column",
+    "conformsTo": "dct:conformsTo",
+    "cr": "http://mlcommons.org/croissant/",
+    "rai": "http://mlcommons.org/croissant/RAI/",
+    "data": {
+      "@id": "cr:data",
+      "@type": "@json"
+    },
+    "dataType": {
+      "@id": "cr:dataType",
+      "@type": "@vocab"
+    },
+    "dct": "http://purl.org/dc/terms/",
+    "equivalentProperty": "cr:equivalentProperty",
+    "examples": {
+      "@id": "cr:examples",
+      "@type": "@json"
+    },
+    "extract": "cr:extract",
+    "field": "cr:field",
+    "fileProperty": "cr:fileProperty",
+    "fileObject": "cr:fileObject",
+    "fileSet": "cr:fileSet",
+    "format": "cr:format",
+    "includes": "cr:includes",
+    "isLiveDataset": "cr:isLiveDataset",
+    "jsonPath": "cr:jsonPath",
+    "key": "cr:key",
+    "md5": "cr:md5",
+    "parentField": "cr:parentField",
+    "path": "cr:path",
+    "recordSet": "cr:recordSet",
+    "references": "cr:references",
+    "regex": "cr:regex",
+    "repeated": "cr:repeated",
+    "replace": "cr:replace",
+    "samplingRate": "cr:samplingRate",
+    "sc": "https://schema.org/",
+    "separator": "cr:separator",
+    "source": "cr:source",
+    "subField": "cr:subField",
+    "transform": "cr:transform"
+  },
+  "@type": "sc:Dataset",
+  "name": "LinguaGapAtlas",
+  "description": "Structured corpus of 96 multilingual AI resources (65 benchmarks and 31 datasets, 2018-2025) classified on five taxonomy dimensions - data origin, linguistic resource tier, task class, cultural specificity, and inference paradigm - with per-resource provenance, the 142-candidate screening log, the annotation codebook, and scripts that recompute the paper's headline statistics and inter-annotator agreement.",
+  "conformsTo": "http://mlcommons.org/croissant/1.0",
+  "citeAs": "Jajee, S. K., Shaw, T., & Soni, V. LinguaGapAtlas: A Corpus and Taxonomy of 96 Multilingual AI Benchmarks and Datasets (corpus and reproducibility package, v1.0.0). https://github.com/sankalpjajee/LinguaGapAtlas",
+  "creator": [
+    {
+      "@type": "sc:Person",
+      "name": "Sankalp K. Jajee",
+      "sameAs": "https://orcid.org/0009-0003-8597-9042"
+    },
+    {
+      "@type": "sc:Person",
+      "name": "Tanisha Shaw"
+    },
+    {
+      "@type": "sc:Person",
+      "name": "Vatsalya Soni"
+    }
+  ],
+  "keywords": [
+    "multilingual AI",
+    "benchmarks",
+    "datasets",
+    "bias",
+    "evaluation",
+    "taxonomy",
+    "fairness"
+  ],
+  "license": "https://creativecommons.org/licenses/by/4.0/",
+  "url": "https://github.com/sankalpjajee/LinguaGapAtlas",
+  "version": "1.0.0",
+  "distribution": [
+    {
+      "@type": "cr:FileObject",
+      "@id": "linguagapatlas.jsonl",
+      "name": "linguagapatlas.jsonl",
+      "description": "One resource per line: consensus labels, votes and the five rounds.",
+      "contentUrl": "linguagapatlas.jsonl",
+      "encodingFormat": "application/jsonlines",
+      "sha256": "7ab1bee67153af08f631d16299f41c2d4bb36075d5d56f2a2814ab8aed8db415"
+    },
+    {
+      "@type": "cr:FileObject",
+      "@id": "linguagapatlas.json",
+      "name": "linguagapatlas.json",
+      "description": "The whole atlas as one JSON document (metadata, taxonomy, statistics, caveats and all resources).",
+      "contentUrl": "linguagapatlas.json",
+      "encodingFormat": "application/json",
+      "sha256": "a6f31bc519a273693986641a49ef82d676437def95a5763fe1f8210bf5acd1bb"
+    },
+    {
+      "@type": "cr:FileObject",
+      "@id": "linguagapatlas.sqlite",
+      "name": "linguagapatlas.sqlite",
+      "description": "The same content as SQLite tables and views.",
+      "contentUrl": "linguagapatlas.sqlite",
+      "encodingFormat": "application/vnd.sqlite3",
+      "sha256": "1bdc104d07950dd61ef6b9d374964cdd23a49c587ba1f37a0da41483ef7a5f88"
+    }
+  ],
+  "recordSet": [
+    {
+      "@type": "cr:RecordSet",
+      "@id": "resources",
+      "name": "resources",
+      "description": "The 96 resources with their consensus labels (null = undetermined).",
+      "key": {
+        "@id": "resources/resource_id"
+      },
+      "field": [
+        {
+          "@type": "cr:Field",
+          "@id": "resources/resource_id",
+          "name": "resource_id",
+          "description": "Stable ID assigned by this project, form QG-001…QG-096. Never reused, never renumbered between versions.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "resource_id"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/resource_name",
+          "name": "resource_name",
+          "description": "The resource's canonical name as given by its creators (e.g. the benchmark/dataset name used in its paper).",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "resource_name"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/canonical_reference",
+          "name": "canonical_reference",
+          "description": "Full citation (authors, title, venue, year) of the paper or release that introduces the resource. null if the resource has no citable paper.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "canonical_reference"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/type",
+          "name": "type",
+          "description": "Benchmark or Dataset. Benchmarks are resources designed for evaluation; datasets are resources designed primarily for training. A resource released as both is coded by its primary stated purpose and the dual nature is noted in evidence_note.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "type"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/year",
+          "name": "year",
+          "description": "Year of first public release (paper or public artifact, whichever came first). null if not determinable.",
+          "dataType": "sc:Integer",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "year"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/languages",
+          "name": "languages",
+          "description": "Semicolon-separated list of language names (or ISO 639 codes) the resource covers, as documented by its creators. null if the documentation does not enumerate them.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "languages"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/language_names",
+          "name": "language_names",
+          "description": "Derived from `languages`: the entries that name a language, in source order (entries such as '75 languages' that only state a count are left out). null when `languages` is null.",
+          "dataType": "sc:Text",
+          "repeated": true,
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "language_names"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/languages_fully_named",
+          "name": "languages_fully_named",
+          "description": "true when `language_names` names every covered language: no count-only entries and as many names as `language_count`.",
+          "dataType": "sc:Boolean",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "languages_fully_named"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/language_count",
+          "name": "language_count",
+          "description": "Number of languages covered, counted from languages where enumerated, otherwise the count stated by the creators. null if neither is available. Never estimated.",
+          "dataType": "sc:Integer",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "language_count"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/data_origin",
+          "name": "data_origin",
+          "description": "How the resource's content was produced. Native: authored originally in the target language(s). Translated: produced by translating content from another language (human or machine). Mixed: both routes used for substantial portions. null if the production route is not documented.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "data_origin"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/resource_tier",
+          "name": "resource_tier",
+          "description": "Linguistic resource tier of the language(s) the resource targets, per the paper's tiering of language resourcedness. For multilingual resources, the tier of the lowest-resourced language substantially covered. null if the covered languages cannot be established.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "resource_tier"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/task_class",
+          "name": "task_class",
+          "description": "The task family the resource evaluates or supports. Benchmarks: QA, Syntax, Reasoning, Multimodal, NLU, Summarization, Math, RAG, Code, Other. Datasets: Pre-training, Translation, Instruction. A resource spanning several classes is coded by its primary class; secondary classes go in evidence_note.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "task_class"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/cultural_specificity",
+          "name": "cultural_specificity",
+          "description": "Universal: designed to be culturally non-specific. Culturally Anchored: content is grounded in the cultural context of its language community without being tied to one sub-region. Region-Specific: content is grounded in a particular country/region's context. null if the documentation does not support a judgement.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "cultural_specificity"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/inference_paradigm",
+          "name": "inference_paradigm",
+          "description": "The inference/evaluation paradigm the resource is built around. Vocabulary to be confirmed against the final codebook before v1.0.0; rows coded before confirmation carry the coder's best judgement and are flagged in confidence. null if not determinable.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "inference_paradigm"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/provenance_url",
+          "name": "provenance_url",
+          "description": "The evidence source the row's labels were taken from — the resource's paper, repository, or documentation page actually consulted. Every coded dimension in the row must be supported by this source or by evidence_note. null only for rows with no coded dimensions.",
+          "dataType": "sc:URL",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "provenance_url"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/evidence_note",
+          "name": "evidence_note",
+          "description": "Free-text note recording what the source states that supports the labels (quoted or paraphrased), plus any dual-nature or secondary-class remarks. This is the audit trail for the row.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "evidence_note"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/coder",
+          "name": "coder",
+          "description": "Identifier of the coder who produced this row's labels (initials or coder ID used in the reliability study).",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "coder"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/confidence",
+          "name": "confidence",
+          "description": "Coder's confidence in the row's labels: high, medium, or low. low rows are candidates for adjudication and are reported as such. null if not recorded.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "confidence"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/screening_status",
+          "name": "screening_status",
+          "description": "Disposition of this resource in the screening pipeline (see data/screening-log.csv): for rows in corpus.csv this is always included; the full candidate set, including exclusions, lives in the screening log.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "screening_status"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "resources/screening_reason",
+          "name": "screening_reason",
+          "description": "For included rows, the eligibility basis (e.g. which inclusion criterion the resource met). Exclusion reasons are recorded in the screening log, not here.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.jsonl"
+            },
+            "extract": {
+              "column": "screening_reason"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "@type": "cr:RecordSet",
+      "@id": "round_labels",
+      "name": "round_labels",
+      "description": "Each coding round's record for each resource (5 per resource).",
+      "key": [
+        {
+          "@id": "round_labels/resource_id"
+        },
+        {
+          "@id": "round_labels/round"
+        }
+      ],
+      "field": [
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/round",
+          "name": "round",
+          "description": "Coding round (A-E).",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].round"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/resource_id",
+          "name": "resource_id",
+          "description": "This round's resource_id.",
+          "dataType": "sc:Text",
+          "references": {
+            "field": {
+              "@id": "resources/resource_id"
+            }
+          },
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].resource_id"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/canonical_reference",
+          "name": "canonical_reference",
+          "description": "This round's canonical_reference.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].canonical_reference"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/type",
+          "name": "type",
+          "description": "This round's type. Canonical label.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].type"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/year",
+          "name": "year",
+          "description": "This round's year.",
+          "dataType": "sc:Integer",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].year"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/languages",
+          "name": "languages",
+          "description": "This round's languages.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].languages"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/language_count",
+          "name": "language_count",
+          "description": "This round's language_count.",
+          "dataType": "sc:Integer",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].language_count"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/data_origin",
+          "name": "data_origin",
+          "description": "This round's data_origin. Canonical label.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].data_origin"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/resource_tier",
+          "name": "resource_tier",
+          "description": "This round's resource_tier. Canonical label.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].resource_tier"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/task_class",
+          "name": "task_class",
+          "description": "This round's task_class. Canonical label.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].task_class"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/cultural_specificity",
+          "name": "cultural_specificity",
+          "description": "This round's cultural_specificity. Canonical label.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].cultural_specificity"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/inference_paradigm",
+          "name": "inference_paradigm",
+          "description": "This round's inference_paradigm. Canonical label.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].inference_paradigm"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/provenance_url",
+          "name": "provenance_url",
+          "description": "This round's provenance_url.",
+          "dataType": "sc:URL",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].provenance_url"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/evidence_note",
+          "name": "evidence_note",
+          "description": "This round's evidence_note.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].evidence_note"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/confidence",
+          "name": "confidence",
+          "description": "This round's confidence.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].confidence"
+            }
+          }
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "round_labels/screening_reason",
+          "name": "screening_reason",
+          "description": "This round's screening_reason.",
+          "dataType": "sc:Text",
+          "source": {
+            "fileObject": {
+              "@id": "linguagapatlas.json"
+            },
+            "extract": {
+              "jsonPath": "$.resources[*].rounds[*].screening_reason"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

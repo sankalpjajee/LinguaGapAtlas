@@ -23,6 +23,18 @@ from the released rows. It exists so that:
   two coders' label files (`scripts/agreement.py`);
 - other researchers can build on the corpus under clear licenses.
 
+## Using the corpus
+
+To use the corpus in your own research, start with **`release/`**. It merges
+the whole package into one release: the consensus labels, every vote behind
+them, all five coding rounds' records and evidence, the taxonomy, statistics
+and caveats. It ships as a single JSON document, JSON Lines (one resource per
+line), an SQLite database, a JSON Schema and Croissant metadata. Each format
+loads directly in Python, pandas, Hugging Face `datasets`, DuckDB, R or any
+SQLite client. See [`release/README.md`](release/README.md) for loading
+examples and the record structure. The release is generated from the files
+below by `scripts/build_release.py` and is never edited by hand.
+
 ## The undetermined rule (read this first)
 
 **A value that could not be determined from a resource's public documentation
@@ -43,6 +55,10 @@ document is *not* evidence for any label.
 | `data-dictionary.md` | Field-by-field definition of `corpus.csv`: types, controlled vocabularies, and the null rule per field. |
 | `scripts/recompute.py` | Recomputes the paper's headline shares (translated-data share, culturally non-specific share, low-resource share) from `data/corpus.csv`, separately for benchmarks and datasets, reporting counts and denominators. |
 | `scripts/agreement.py` | Computes observed agreement and Cohen's kappa between two coder CSVs, per taxonomy dimension and overall. |
+| `coding/` | The five independent coding rounds (`coderA-full.csv` … `coderE-full.csv`, same schema as `corpus.csv`) and the cross-round disagreement list. `data/corpus.csv` is their majority-vote consensus. |
+| `scripts/build_consensus.py` | Builds `data/corpus.csv` from the five coding rounds by majority vote (≥3 of 5). |
+| `release/` | The amalgamated research release, generated from the files above: `linguagapatlas.json`, `.jsonl`, `.sqlite`, `.schema.json`, `croissant.json`, and a dataset card (`release/README.md`). |
+| `scripts/build_release.py` | Builds `release/` from the source files; `--check` verifies that `release/` is current. |
 | `CITATION.cff` | Machine-readable citation metadata for this artifact. |
 | `MANIFEST.sha256` | SHA-256 checksums for every file in the release (see *File integrity* below). |
 | `tests/` | Tiny, clearly-marked **synthetic** CSVs used only to smoke-test the scripts. They are not corpus data and must never be merged into `data/`. |
