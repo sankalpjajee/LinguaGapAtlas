@@ -48,7 +48,7 @@
   },
   "@type": "sc:Dataset",
   "name": "LinguaGapAtlas",
-  "description": "Structured corpus of 96 multilingual AI resources (65 benchmarks and 31 datasets, 2018-2025) classified on five taxonomy dimensions - data origin, linguistic resource tier, task class, cultural specificity, and inference paradigm - with per-resource provenance, the 142-candidate screening log, the annotation codebook, and scripts that recompute the paper's headline statistics and inter-annotator agreement.",
+  "description": "Machine-readable release of the LinguaGapAtlas corpus: 96 multilingual AI resources (58 benchmarks and 38 datasets under the five-round majority consensus; first released 2005-2025) classified on five taxonomy dimensions (data origin, linguistic resource tier, task class, cultural specificity, inference paradigm). For every resource it gives the consensus labels (null = undetermined), the votes of the five independent coding rounds behind each consensus cell, and each round's own labels, evidence notes, sources and confidence; plus the taxonomy and controlled vocabularies, statistics computed from the labels, and caveats to read before use. The screening log holds 0 candidate rows. The codebook and scripts are in the source repository.",
   "conformsTo": "http://mlcommons.org/croissant/1.0",
   "citeAs": "Jajee, S. K., Shaw, T., & Soni, V. LinguaGapAtlas: A Corpus and Taxonomy of 96 Multilingual AI Benchmarks and Datasets (corpus and reproducibility package, v1.0.0). https://github.com/sankalpjajee/LinguaGapAtlas",
   "creator": [
@@ -78,6 +78,19 @@
   "license": "https://creativecommons.org/licenses/by/4.0/",
   "url": "https://github.com/sankalpjajee/LinguaGapAtlas",
   "version": "1.0.0",
+  "rai:dataCollection": "Five independent blind coding rounds (A-E), each coding all 96 resources from primary sources under the same codebook (rounds-summary.md). type, data_origin, resource_tier, task_class and cultural_specificity take a value only when at least 3 of the 5 rounds agree on it after normalization; otherwise the cell is null. inference_paradigm is not voted on: it is round A's cell (every round left it undetermined).",
+  "rai:dataLimitations": [
+    "rounds-summary.md states: \"The second coders are AI agents; the paper must disclose this as AI second-coding / human–AI agreement, not two-human IAA.\" This package does not record which rounds were coded by whom.",
+    "The consensus corpus has 58 benchmarks and 38 datasets; the paper describes 65 and 31. Shares computed from this release for benchmarks (translated 52.0%, Universal 79.6%, Low tier 100.0% of tier-coded rows) are not the published 26.2%, 55.4% and 6.2% (see rounds-summary.md), and first-release years run 2005-2025, not 2018-2025. Figures in this release are computed from the released labels.",
+    "resource_tier has a consensus value for 12 of 96 resources (12 Low; no other tier); 4 more were coded by only 1-2 rounds (no majority) and 80 were left undetermined by every round, because sources rarely state a tier. The low-resource share is not estimable from this release, and tier agreement (kappa 1.0 on a handful of jointly coded pairs) is not a reliability estimate.",
+    "inference_paradigm (D5) is null for every resource in the consensus and in every round: the codebook does not enumerate its values (methods/codebook-draft.md, D5), and the vocabulary listed in data-dictionary.md is provisional.",
+    "data/screening-log.csv contains 0 candidate rows: the 142-candidate screening record (46 exclusions) that data-dictionary.md describes is not in this release. An empty candidate list is not evidence that no candidates were excluded.",
+    "task_class values Generation, Long Context, Embeddings occur in the data but are not in data-dictionary.md's listed vocabulary (they belong to the 13-class set in methods/codebook-draft.md, ambiguity A6). data-dictionary.md lists task classes separately for benchmarks and datasets (applies_to), yet 6 resources carry a class listed only for the other type (QG-038, QG-039, QG-040, QG-048, QG-053, QG-062; codebook ambiguity A9).",
+    "At resource level, canonical_reference, provenance_url, screening_reason and the evidence quoted in evidence_note are round A's (the consensus build's base round). In 16 resources round A coded a different value from the consensus for at least one voted label, so the quoted evidence can support a label other than the consensus one. screening_reason is null at resource level because round A left it empty; other rounds record one for 64 resources. Every round's own reference, URL, evidence note, confidence and screening reason is under rounds.",
+    "Resource-level confidence is derived from the vote (high: no split or no-majority voted cell; medium: 1-2; low: 3 or more), not recorded by a coder. Each round's own confidence is under rounds.",
+    "21 resources document their languages only partly or only as a count (e.g. '75 languages'); for these, language_names holds just the languages actually named and languages_fully_named is false. A further 6 have no documented language list (languages and language_names are null). language_count is as documented, so a value such as 250 for '250+ languages' is a lower bound.",
+    "The codebook (methods/codebook-draft.md) is a draft. Adjudication of the split cells and the decision rules it is meant to produce are pending (methods/iaa-protocol.md)."
+  ],
   "distribution": [
     {
       "@type": "cr:FileObject",
@@ -95,16 +108,16 @@
       "description": "The whole atlas as one JSON document (metadata, taxonomy, statistics, caveats and all resources).",
       "contentUrl": "linguagapatlas.json",
       "encodingFormat": "application/json",
-      "sha256": "a6f31bc519a273693986641a49ef82d676437def95a5763fe1f8210bf5acd1bb"
+      "sha256": "322ca2a6a20f2aad4b71da89d6308ac4de22b879ccf2386ac772d1a43b65dbd2"
     },
     {
       "@type": "cr:FileObject",
       "@id": "linguagapatlas.sqlite",
       "name": "linguagapatlas.sqlite",
-      "description": "The same content as SQLite tables and views.",
+      "description": "Every source cell, the consensus votes, vocabularies, caveats and metadata as SQLite tables and views (statistics and consensus rules are in the JSON document).",
       "contentUrl": "linguagapatlas.sqlite",
       "encodingFormat": "application/vnd.sqlite3",
-      "sha256": "1bdc104d07950dd61ef6b9d374964cdd23a49c587ba1f37a0da41483ef7a5f88"
+      "sha256": "a907f6fa354833f90f09f4b21c8915c4ceecd58f075655c3fe8c35739d609c5d"
     }
   ],
   "recordSet": [
@@ -362,7 +375,7 @@
           "@type": "cr:Field",
           "@id": "resources/coder",
           "name": "coder",
-          "description": "Identifier of the coder who produced this row's labels (initials or coder ID used in the reliability study).",
+          "description": "Always 'consensus-5rounds': the row is the majority vote of the five coding rounds. Each round's coder is its round letter (see rounds).",
           "dataType": "sc:Text",
           "source": {
             "fileObject": {
@@ -377,7 +390,7 @@
           "@type": "cr:Field",
           "@id": "resources/confidence",
           "name": "confidence",
-          "description": "Coder's confidence in the row's labels: high, medium, or low. low rows are candidates for adjudication and are reported as such. null if not recorded.",
+          "description": "Derived from the vote, not recorded by a coder: high when none of the voted label cells is split or without majority, medium for 1-2 such cells, low for 3 or more. Each round's own confidence is under rounds.",
           "dataType": "sc:Text",
           "source": {
             "fileObject": {

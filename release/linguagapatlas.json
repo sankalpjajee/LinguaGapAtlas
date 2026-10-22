@@ -3,7 +3,9 @@
   "name": "LinguaGapAtlas",
   "title": "LinguaGapAtlas: A Corpus and Taxonomy of 96 Multilingual AI Benchmarks and Datasets",
   "version": "1.0.0",
-  "description": "Structured corpus of 96 multilingual AI resources (65 benchmarks and 31 datasets, 2018-2025) classified on five taxonomy dimensions - data origin, linguistic resource tier, task class, cultural specificity, and inference paradigm - with per-resource provenance, the 142-candidate screening log, the annotation codebook, and scripts that recompute the paper's headline statistics and inter-annotator agreement.",
+  "date_released": null,
+  "doi": null,
+  "description": "Machine-readable release of the LinguaGapAtlas corpus: 96 multilingual AI resources (58 benchmarks and 38 datasets under the five-round majority consensus; first released 2005-2025) classified on five taxonomy dimensions (data origin, linguistic resource tier, task class, cultural specificity, inference paradigm). For every resource it gives the consensus labels (null = undetermined), the votes of the five independent coding rounds behind each consensus cell, and each round's own labels, evidence notes, sources and confidence; plus the taxonomy and controlled vocabularies, statistics computed from the labels, and caveats to read before use. The screening log holds 0 candidate rows. The codebook and scripts are in the source repository.",
   "keywords": [
     "multilingual AI",
     "benchmarks",
@@ -80,6 +82,26 @@
     {
       "path": "CITATION.cff",
       "sha256": "cdac485e2d8021040c56ca2b7defab8a6e6ad4c318de4f778346d9f0cabcc6a3"
+    },
+    {
+      "path": "rounds-summary.md",
+      "sha256": "88497aa5830b6fd98aac52256c18d3bc0dea0ad492ef3236b5c6b831a52bcd6b"
+    },
+    {
+      "path": "README.md",
+      "sha256": "a726349a1bf0c16ef4ab01784466d4f9998bb64f68401a0f1779a9079e671f7f"
+    },
+    {
+      "path": "scripts/build_consensus.py",
+      "sha256": "78d59a7affe6ad3c896d6b82311f6bf95c9f2258022b2a079936125898fba987"
+    },
+    {
+      "path": "scripts/recompute.py",
+      "sha256": "8b029a06108078259dc1c75eb4916a4c358ea57c0c63f6d459d699cb1b875afd"
+    },
+    {
+      "path": "scripts/agreement.py",
+      "sha256": "ed7c52e6e84318dbda3318c38f679883d7efeb18f8fc0cb091e2f959427f2ef5"
     }
   ],
   "generator": "scripts/build_release.py",
@@ -152,7 +174,7 @@
     },
     {
       "field": "task_class",
-      "type": "see below",
+      "type": "enum (values in taxonomy D3)",
       "description": "The task family the resource evaluates or supports. Benchmarks: QA, Syntax, Reasoning, Multimodal, NLU, Summarization, Math, RAG, Code, Other. Datasets: Pre-training, Translation, Instruction. A resource spanning several classes is coded by its primary class; secondary classes go in evidence_note.",
       "source": "data-dictionary.md"
     },
@@ -183,14 +205,14 @@
     {
       "field": "coder",
       "type": "string",
-      "description": "Identifier of the coder who produced this row's labels (initials or coder ID used in the reliability study).",
-      "source": "data-dictionary.md"
+      "description": "Always 'consensus-5rounds': the row is the majority vote of the five coding rounds. Each round's coder is its round letter (see rounds).",
+      "source": "derived"
     },
     {
       "field": "confidence",
       "type": "enum",
-      "description": "Coder's confidence in the row's labels: high, medium, or low. low rows are candidates for adjudication and are reported as such. null if not recorded.",
-      "source": "data-dictionary.md"
+      "description": "Derived from the vote, not recorded by a coder: high when none of the voted label cells is split or without majority, medium for 1-2 such cells, low for 3 or more. Each round's own confidence is under rounds.",
+      "source": "derived"
     },
     {
       "field": "screening_status",
@@ -221,18 +243,12 @@
     "type": [
       {
         "value": "Benchmark",
-        "applies_to": [
-          "Benchmark",
-          "Dataset"
-        ],
+        "applies_to": null,
         "listed_in_data_dictionary": true
       },
       {
         "value": "Dataset",
-        "applies_to": [
-          "Benchmark",
-          "Dataset"
-        ],
+        "applies_to": null,
         "listed_in_data_dictionary": true
       }
     ],
@@ -492,14 +508,6 @@
               "Dataset"
             ],
             "listed_in_data_dictionary": true
-          },
-          {
-            "value": "confidence",
-            "applies_to": [
-              "Benchmark",
-              "Dataset"
-            ],
-            "listed_in_data_dictionary": true
           }
         ]
       }
@@ -559,17 +567,38 @@
       ]
     },
     "consensus_rules": {
-      "labels": "type, data_origin, resource_tier, task_class and cultural_specificity take a value only when at least 3 of the 5 rounds agree on it after normalization; otherwise the cell is null. inference_paradigm is not voted on (every round left it undetermined).",
-      "year": "The most common year when at least 2 rounds report it, otherwise round A's year.",
-      "language_count": "The modal reported count; on a tie, the median reported count.",
-      "languages": "The longest list among the rounds that reported the chosen count; round A's value when none did.",
-      "confidence": "high when no voted cell is split or unresolved, medium for 1-2 such cells, low for 3 or more.",
-      "scaffold": "canonical_reference, provenance_url, the screening fields and the evidence quoted in evidence_note are round A's (the base round)."
+      "labels": "type, data_origin, resource_tier, task_class and cultural_specificity take a value only when at least 3 of the 5 rounds agree on it after normalization; otherwise the cell is null. inference_paradigm is not voted on: it is round A's cell (every round left it undetermined).",
+      "year": "A year reported by at least 2 rounds (on a tie, the one reported first in round order A-E); otherwise round A's cell.",
+      "language_count": "The most frequently reported count; on a tie, element n//2 of all n reported counts in ascending order (the upper median); round A's cell when no round reports a count.",
+      "languages": "Among the rounds that reported the chosen count, the longest languages text by characters (earliest round on ties), which can be a count statement such as '24 languages'; round A's cell when none of them has one.",
+      "confidence": "high when none of the five voted label cells is split or without majority, medium for 1-2 such cells, low for 3 or more.",
+      "scaffold": "resource_name, canonical_reference, provenance_url, the screening fields, inference_paradigm and the evidence quoted in evidence_note are round A's (the base round)."
     },
+    "source_columns": [
+      "resource_id",
+      "resource_name",
+      "canonical_reference",
+      "type",
+      "year",
+      "languages",
+      "language_count",
+      "data_origin",
+      "resource_tier",
+      "task_class",
+      "cultural_specificity",
+      "inference_paradigm",
+      "provenance_url",
+      "evidence_note",
+      "coder",
+      "confidence",
+      "screening_status",
+      "screening_reason"
+    ],
+    "reconstruction": "Each source CSV has source_columns in this order. corpus.csv is the resource-level fields; a round file is that round's records, with labels taken from labels_as_written, resource_id, resource_name and screening_status from the resource, and coder equal to the round letter. Write null as an empty cell.",
     "generator": "scripts/build_consensus.py"
   },
   "statistics": {
-    "note": "Computed from this release's labels; shares exclude undetermined rows from the denominator (scripts/recompute.py). Agreement is Cohen's kappa over the 10 round pairs on normalized labels, counting only resources both rounds coded.",
+    "note": "Computed from this release's labels; shares exclude undetermined rows from the denominator (scripts/recompute.py). headline_shares groups resources by their consensus type; headline_shares_by_round groups each round's rows by that round's own type label (type_basis 'round'), as recompute.py does when run on a round file. Agreement is Cohen's kappa over the 10 round pairs on normalized labels, counting only resources both rounds coded; the means are over the unrounded pairwise values.",
     "composition": {
       "Benchmark": 58,
       "Dataset": 38,
@@ -640,6 +669,7 @@
     "headline_shares_by_round": [
       {
         "round": "A",
+        "type_basis": "round",
         "type": "Benchmark",
         "statistic": "translated-data share",
         "field": "data_origin",
@@ -651,6 +681,7 @@
       },
       {
         "round": "A",
+        "type_basis": "round",
         "type": "Benchmark",
         "statistic": "culturally non-specific share",
         "field": "cultural_specificity",
@@ -662,6 +693,7 @@
       },
       {
         "round": "A",
+        "type_basis": "round",
         "type": "Benchmark",
         "statistic": "low-resource share",
         "field": "resource_tier",
@@ -673,6 +705,7 @@
       },
       {
         "round": "A",
+        "type_basis": "round",
         "type": "Dataset",
         "statistic": "translated-data share",
         "field": "data_origin",
@@ -684,6 +717,7 @@
       },
       {
         "round": "A",
+        "type_basis": "round",
         "type": "Dataset",
         "statistic": "culturally non-specific share",
         "field": "cultural_specificity",
@@ -695,6 +729,7 @@
       },
       {
         "round": "A",
+        "type_basis": "round",
         "type": "Dataset",
         "statistic": "low-resource share",
         "field": "resource_tier",
@@ -706,6 +741,7 @@
       },
       {
         "round": "B",
+        "type_basis": "round",
         "type": "Benchmark",
         "statistic": "translated-data share",
         "field": "data_origin",
@@ -717,6 +753,7 @@
       },
       {
         "round": "B",
+        "type_basis": "round",
         "type": "Benchmark",
         "statistic": "culturally non-specific share",
         "field": "cultural_specificity",
@@ -728,6 +765,7 @@
       },
       {
         "round": "B",
+        "type_basis": "round",
         "type": "Benchmark",
         "statistic": "low-resource share",
         "field": "resource_tier",
@@ -739,6 +777,7 @@
       },
       {
         "round": "B",
+        "type_basis": "round",
         "type": "Dataset",
         "statistic": "translated-data share",
         "field": "data_origin",
@@ -750,6 +789,7 @@
       },
       {
         "round": "B",
+        "type_basis": "round",
         "type": "Dataset",
         "statistic": "culturally non-specific share",
         "field": "cultural_specificity",
@@ -761,6 +801,7 @@
       },
       {
         "round": "B",
+        "type_basis": "round",
         "type": "Dataset",
         "statistic": "low-resource share",
         "field": "resource_tier",
@@ -772,6 +813,7 @@
       },
       {
         "round": "C",
+        "type_basis": "round",
         "type": "Benchmark",
         "statistic": "translated-data share",
         "field": "data_origin",
@@ -783,6 +825,7 @@
       },
       {
         "round": "C",
+        "type_basis": "round",
         "type": "Benchmark",
         "statistic": "culturally non-specific share",
         "field": "cultural_specificity",
@@ -794,6 +837,7 @@
       },
       {
         "round": "C",
+        "type_basis": "round",
         "type": "Benchmark",
         "statistic": "low-resource share",
         "field": "resource_tier",
@@ -805,6 +849,7 @@
       },
       {
         "round": "C",
+        "type_basis": "round",
         "type": "Dataset",
         "statistic": "translated-data share",
         "field": "data_origin",
@@ -816,6 +861,7 @@
       },
       {
         "round": "C",
+        "type_basis": "round",
         "type": "Dataset",
         "statistic": "culturally non-specific share",
         "field": "cultural_specificity",
@@ -827,6 +873,7 @@
       },
       {
         "round": "C",
+        "type_basis": "round",
         "type": "Dataset",
         "statistic": "low-resource share",
         "field": "resource_tier",
@@ -838,6 +885,7 @@
       },
       {
         "round": "D",
+        "type_basis": "round",
         "type": "Benchmark",
         "statistic": "translated-data share",
         "field": "data_origin",
@@ -849,6 +897,7 @@
       },
       {
         "round": "D",
+        "type_basis": "round",
         "type": "Benchmark",
         "statistic": "culturally non-specific share",
         "field": "cultural_specificity",
@@ -860,6 +909,7 @@
       },
       {
         "round": "D",
+        "type_basis": "round",
         "type": "Benchmark",
         "statistic": "low-resource share",
         "field": "resource_tier",
@@ -871,6 +921,7 @@
       },
       {
         "round": "D",
+        "type_basis": "round",
         "type": "Dataset",
         "statistic": "translated-data share",
         "field": "data_origin",
@@ -882,6 +933,7 @@
       },
       {
         "round": "D",
+        "type_basis": "round",
         "type": "Dataset",
         "statistic": "culturally non-specific share",
         "field": "cultural_specificity",
@@ -893,6 +945,7 @@
       },
       {
         "round": "D",
+        "type_basis": "round",
         "type": "Dataset",
         "statistic": "low-resource share",
         "field": "resource_tier",
@@ -904,6 +957,7 @@
       },
       {
         "round": "E",
+        "type_basis": "round",
         "type": "Benchmark",
         "statistic": "translated-data share",
         "field": "data_origin",
@@ -915,6 +969,7 @@
       },
       {
         "round": "E",
+        "type_basis": "round",
         "type": "Benchmark",
         "statistic": "culturally non-specific share",
         "field": "cultural_specificity",
@@ -926,6 +981,7 @@
       },
       {
         "round": "E",
+        "type_basis": "round",
         "type": "Benchmark",
         "statistic": "low-resource share",
         "field": "resource_tier",
@@ -937,6 +993,7 @@
       },
       {
         "round": "E",
+        "type_basis": "round",
         "type": "Dataset",
         "statistic": "translated-data share",
         "field": "data_origin",
@@ -948,6 +1005,7 @@
       },
       {
         "round": "E",
+        "type_basis": "round",
         "type": "Dataset",
         "statistic": "culturally non-specific share",
         "field": "cultural_specificity",
@@ -959,6 +1017,7 @@
       },
       {
         "round": "E",
+        "type_basis": "round",
         "type": "Dataset",
         "statistic": "low-resource share",
         "field": "resource_tier",
@@ -1022,8 +1081,7 @@
             "Generative": 0,
             "Retrieval-Augmented": 0,
             "Mixed": 0,
-            "Other": 0,
-            "confidence": 0
+            "Other": 0
           },
           "undetermined": 58
         }
@@ -1080,8 +1138,7 @@
             "Generative": 0,
             "Retrieval-Augmented": 0,
             "Mixed": 0,
-            "Other": 0,
-            "confidence": 0
+            "Other": 0
           },
           "undetermined": 38
         }
@@ -1325,7 +1382,7 @@
         ]
       },
       "task_class": {
-        "mean_pairwise_kappa": 0.9245,
+        "mean_pairwise_kappa": 0.9246,
         "mean_pairwise_observed": 0.9333,
         "pairwise": [
           {
@@ -1533,12 +1590,12 @@
     {
       "id": "differs-from-paper",
       "topic": "statistics",
-      "text": "The consensus corpus has 58 benchmarks and 38 datasets; the paper describes 65 and 31. Shares computed from this release for benchmarks (translated 52.0%, Universal 79.6%, Low tier 100.0% of tier-coded rows) are not the published 26.2%, 55.4% and 6.2% (see rounds-summary.md). Figures in this release are computed from the released labels."
+      "text": "The consensus corpus has 58 benchmarks and 38 datasets; the paper describes 65 and 31. Shares computed from this release for benchmarks (translated 52.0%, Universal 79.6%, Low tier 100.0% of tier-coded rows) are not the published 26.2%, 55.4% and 6.2% (see rounds-summary.md), and first-release years run 2005-2025, not 2018-2025. Figures in this release are computed from the released labels."
     },
     {
       "id": "tier-sparse",
       "topic": "resource_tier",
-      "text": "resource_tier is coded for 12 of 96 resources (12 Low, none Medium or High); the rest are undetermined because sources rarely state a tier. The low-resource share is not estimable from this release, and tier agreement (kappa 1.0 on a handful of jointly coded pairs) is not a reliability estimate."
+      "text": "resource_tier has a consensus value for 12 of 96 resources (12 Low; no other tier); 4 more were coded by only 1-2 rounds (no majority) and 80 were left undetermined by every round, because sources rarely state a tier. The low-resource share is not estimable from this release, and tier agreement (kappa 1.0 on a handful of jointly coded pairs) is not a reliability estimate."
     },
     {
       "id": "inference-paradigm-uncoded",
@@ -1553,17 +1610,17 @@
     {
       "id": "task-class-vocabulary",
       "topic": "task_class",
-      "text": "task_class values Generation, Long Context, Embeddings occur in the data but are not in data-dictionary.md's listed vocabulary (they belong to the 13-class set in methods/codebook-draft.md, ambiguity A6). Each vocabulary entry carries listed_in_data_dictionary."
+      "text": "task_class values Generation, Long Context, Embeddings occur in the data but are not in data-dictionary.md's listed vocabulary (they belong to the 13-class set in methods/codebook-draft.md, ambiguity A6). data-dictionary.md lists task classes separately for benchmarks and datasets (applies_to), yet 6 resources carry a class listed only for the other type (QG-038, QG-039, QG-040, QG-048, QG-053, QG-062; codebook ambiguity A9)."
     },
     {
       "id": "round-a-scaffold",
       "topic": "provenance",
-      "text": "At resource level, canonical_reference, provenance_url and the evidence quoted in evidence_note are round A's (the consensus build's base round). Every round's own reference, URL, evidence note and confidence is under rounds."
+      "text": "At resource level, canonical_reference, provenance_url, screening_reason and the evidence quoted in evidence_note are round A's (the consensus build's base round). In 16 resources round A coded a different value from the consensus for at least one voted label, so the quoted evidence can support a label other than the consensus one. screening_reason is null at resource level because round A left it empty; other rounds record one for 64 resources. Every round's own reference, URL, evidence note, confidence and screening reason is under rounds."
     },
     {
       "id": "consensus-confidence",
       "topic": "confidence",
-      "text": "Resource-level confidence is derived from the vote (high: no split or unresolved voted cell; medium: 1-2; low: 3 or more), not recorded by a coder. Each round's own confidence is under rounds."
+      "text": "Resource-level confidence is derived from the vote (high: no split or no-majority voted cell; medium: 1-2; low: 3 or more), not recorded by a coder. Each round's own confidence is under rounds."
     },
     {
       "id": "languages-count-only",

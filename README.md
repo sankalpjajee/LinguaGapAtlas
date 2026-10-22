@@ -19,8 +19,8 @@ from the released rows. It exists so that:
   (`scripts/recompute.py`);
 - the classification can be audited — each row carries the evidence source the
   label was taken from;
-- the annotation reliability reported in the paper can be recomputed from the
-  two coders' label files (`scripts/agreement.py`);
+- the annotation reliability reported in the paper can be recomputed, pair by
+  pair, from the coding rounds' label files (`scripts/agreement.py`);
 - other researchers can build on the corpus under clear licenses.
 
 ## Using the corpus
@@ -59,7 +59,10 @@ document is *not* evidence for any label.
 | `scripts/build_consensus.py` | Builds `data/corpus.csv` from the five coding rounds by majority vote (≥3 of 5). |
 | `release/` | The amalgamated research release, generated from the files above: `linguagapatlas.json`, `.jsonl`, `.sqlite`, `.schema.json`, `croissant.json`, and a dataset card (`release/README.md`). |
 | `scripts/build_release.py` | Builds `release/` from the source files; `--check` verifies that `release/` is current. |
+| `rounds-summary.md` | Results of the five coding rounds: per-round headline statistics, agreement across rounds, consensus coverage and caveats. |
+| `methods/` | The codebook draft (`codebook-draft.md`) and the inter-annotator agreement protocol (`iaa-protocol.md`). |
 | `CITATION.cff` | Machine-readable citation metadata for this artifact. |
+| `LICENSES.md` | The data and code licenses. |
 | `MANIFEST.sha256` | SHA-256 checksums for every file in the release (see *File integrity* below). |
 | `tests/` | Tiny, clearly-marked **synthetic** CSVs used only to smoke-test the scripts. They are not corpus data and must never be merged into `data/`. |
 
@@ -118,7 +121,8 @@ release.
 To generate the manifest for a release (from the package root):
 
 ```sh
-find . -type f ! -name 'MANIFEST.sha256' -print0 \
+find . -type f ! -name 'MANIFEST.sha256' -not -path './.git/*' \
+  -not -path '*/__pycache__/*' -print0 \
   | sort -z | xargs -0 sha256sum > MANIFEST.sha256
 ```
 
@@ -129,6 +133,5 @@ sha256sum -c MANIFEST.sha256
 ```
 
 Regenerate the manifest whenever any file in the package changes, and commit
-it together with that change. (This scaffold intentionally ships without a
-populated manifest: checksums are generated at release time from the final
-files, never written by hand.)
+it together with that change. Checksums are always generated from the final
+files, never written by hand.

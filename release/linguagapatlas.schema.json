@@ -2,12 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/sankalpjajee/LinguaGapAtlas/release/linguagapatlas.schema.json",
   "title": "LinguaGapAtlas release document",
-  "description": "Schema for linguagapatlas.json (the whole document) and, via #/$defs/resource, for each line of linguagapatlas.jsonl.",
+  "description": "Schema for linguagapatlas.json (the whole document) and, via #/$defs/resource, for each line of linguagapatlas.jsonl. Invariants it cannot express (e.g. vote counts summing to rounds_coded, the consensus value matching the top-level label) are enforced by scripts/build_release.py.",
   "type": "object",
+  "additionalProperties": false,
   "required": [
     "name",
     "title",
     "version",
+    "date_released",
+    "doi",
     "description",
     "keywords",
     "authors",
@@ -30,36 +33,402 @@
     "$schema": {
       "type": "string"
     },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "date_released": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "doi": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "authors": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "given_names",
+          "family_names",
+          "orcid"
+        ],
+        "properties": {
+          "given_names": {
+            "type": "string",
+            "minLength": 1
+          },
+          "family_names": {
+            "type": "string",
+            "minLength": 1
+          },
+          "orcid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "citation": {
+      "type": "string",
+      "minLength": 1
+    },
+    "paper": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "status"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "repository": {
+      "type": "string",
+      "minLength": 1
+    },
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "data_url",
+        "code",
+        "code_url",
+        "note"
+      ],
+      "properties": {
+        "data": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "code_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "null_rule": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "generator": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fields": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field",
+          "type",
+          "description",
+          "source"
+        ],
+        "properties": {
+          "field": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "taxonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "dimensions",
+        "confidence"
+      ],
+      "properties": {
+        "type": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "applies_to",
+              "listed_in_data_dictionary"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "minLength": 1
+              },
+              "applies_to": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "enum": [
+                    "Benchmark",
+                    "Dataset"
+                  ]
+                }
+              },
+              "listed_in_data_dictionary": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "dimensions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "field",
+              "name",
+              "definition",
+              "values"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^D[1-5]$"
+              },
+              "field": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "definition": {
+                "type": "string",
+                "minLength": 1
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "value",
+                    "applies_to",
+                    "listed_in_data_dictionary"
+                  ],
+                  "properties": {
+                    "value": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "applies_to": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "enum": [
+                          "Benchmark",
+                          "Dataset"
+                        ]
+                      }
+                    },
+                    "listed_in_data_dictionary": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "confidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "coding": {
+      "type": "object",
+      "required": [
+        "design",
+        "rounds",
+        "label_normalization",
+        "consensus_rules",
+        "source_columns",
+        "reconstruction",
+        "generator"
+      ]
+    },
+    "statistics": {
+      "type": "object",
+      "required": [
+        "note",
+        "composition",
+        "headline_shares",
+        "headline_shares_by_round",
+        "distributions",
+        "consensus_coverage",
+        "agreement"
+      ]
+    },
+    "caveats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "topic",
+          "text"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "topic": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "screening_log": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "columns",
+        "candidate_count",
+        "candidates"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "candidate_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
     "resources": {
       "type": "array",
+      "minItems": 1,
       "items": {
         "$ref": "#/$defs/resource"
       }
-    },
-    "name": {},
-    "title": {},
-    "version": {},
-    "description": {},
-    "keywords": {},
-    "authors": {},
-    "citation": {},
-    "paper": {},
-    "repository": {},
-    "license": {},
-    "null_rule": {},
-    "sources": {},
-    "generator": {},
-    "fields": {},
-    "taxonomy": {},
-    "coding": {},
-    "statistics": {},
-    "caveats": {},
-    "screening_log": {}
+    }
   },
   "$defs": {
     "resource_id": {
       "type": "string",
-      "pattern": "^QG-\\d{3}$"
+      "pattern": "^QG-[0-9]{3}$"
     },
     "resource": {
       "type": "object",
@@ -95,6 +464,7 @@
         },
         "resource_name": {
           "type": "string",
+          "minLength": 1,
           "description": "The resource's canonical name as given by its creators (e.g. the benchmark/dataset name used in its paper)."
         },
         "canonical_reference": {
@@ -105,6 +475,7 @@
           "description": "Full citation (authors, title, venue, year) of the paper or release that introduces the resource. null if the resource has no citable paper."
         },
         "type": {
+          "type": "string",
           "enum": [
             "Benchmark",
             "Dataset"
@@ -116,6 +487,8 @@
             "integer",
             "null"
           ],
+          "minimum": 1900,
+          "maximum": 2100,
           "description": "Year of first public release (paper or public artifact, whichever came first). null if not determinable."
         },
         "languages": {
@@ -131,7 +504,8 @@
             "null"
           ],
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "description": "Derived from `languages`: the entries that name a language, in source order (entries such as '75 languages' that only state a count are left out). null when `languages` is null."
         },
@@ -144,6 +518,7 @@
             "integer",
             "null"
           ],
+          "minimum": 1,
           "description": "Number of languages covered, counted from languages where enumerated, otherwise the count stated by the creators. null if neither is available. Never estimated."
         },
         "data_origin": {
@@ -222,7 +597,6 @@
             "Retrieval-Augmented",
             "Mixed",
             "Other",
-            "confidence",
             null
           ],
           "description": "The inference/evaluation paradigm the resource is built around. Vocabulary to be confirmed against the final codebook before v1.0.0; rows coded before confirmation carry the coder's best judgement and are flagged in confidence. null if not determinable."
@@ -242,11 +616,8 @@
           "description": "Free-text note recording what the source states that supports the labels (quoted or paraphrased), plus any dual-nature or secondary-class remarks. This is the audit trail for the row."
         },
         "coder": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "Identifier of the coder who produced this row's labels (initials or coder ID used in the reliability study)."
+          "const": "consensus-5rounds",
+          "description": "Always 'consensus-5rounds': the row is the majority vote of the five coding rounds. Each round's coder is its round letter (see rounds)."
         },
         "confidence": {
           "enum": [
@@ -254,7 +625,7 @@
             "medium",
             "low"
           ],
-          "description": "Coder's confidence in the row's labels: high, medium, or low. low rows are candidates for adjudication and are reported as such. null if not recorded."
+          "description": "Derived from the vote, not recorded by a coder: high when none of the voted label cells is split or without majority, medium for 1-2 such cells, low for 3 or more. Each round's own confidence is under rounds."
         },
         "screening_status": {
           "const": "included",
@@ -303,10 +674,49 @@
         "rounds": {
           "type": "array",
           "minItems": 5,
-          "maxItems": 5,
-          "items": {
-            "$ref": "#/$defs/round"
-          },
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/round",
+              "properties": {
+                "round": {
+                  "const": "A"
+                }
+              }
+            },
+            {
+              "$ref": "#/$defs/round",
+              "properties": {
+                "round": {
+                  "const": "B"
+                }
+              }
+            },
+            {
+              "$ref": "#/$defs/round",
+              "properties": {
+                "round": {
+                  "const": "C"
+                }
+              }
+            },
+            {
+              "$ref": "#/$defs/round",
+              "properties": {
+                "round": {
+                  "const": "D"
+                }
+              }
+            },
+            {
+              "$ref": "#/$defs/round",
+              "properties": {
+                "round": {
+                  "const": "E"
+                }
+              }
+            }
+          ],
+          "items": false,
           "description": "The five independent coding rounds' own records for this resource (A-E), with labels in canonical form and as written."
         }
       }
@@ -367,7 +777,9 @@
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "minimum": 1900,
+          "maximum": 2100
         },
         "languages": {
           "type": [
@@ -379,7 +791,8 @@
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "minimum": 1
         },
         "data_origin": {
           "type": [
@@ -453,7 +866,6 @@
             "Retrieval-Augmented",
             "Mixed",
             "Other",
-            "confidence",
             null
           ]
         },
@@ -581,6 +993,7 @@
         },
         "votes": {
           "type": "array",
+          "maxItems": 5,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -598,10 +1011,12 @@
               },
               "count": {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1,
+                "maximum": 5
               },
               "rounds": {
                 "type": "array",
+                "minItems": 1,
                 "uniqueItems": true,
                 "items": {
                   "enum": [
@@ -616,7 +1031,79 @@
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "consensus"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "enum": [
+                  "Benchmark",
+                  "Dataset"
+                ]
+              },
+              "support": {
+                "minimum": 3
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "no_majority"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "const": null
+              },
+              "support": {
+                "minimum": 1,
+                "maximum": 2
+              },
+              "rounds_coded": {
+                "minimum": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "not_coded"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "const": null
+              },
+              "support": {
+                "const": 0
+              },
+              "rounds_coded": {
+                "const": 0
+              },
+              "votes": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
     },
     "decision_data_origin": {
       "type": "object",
@@ -660,6 +1147,7 @@
         },
         "votes": {
           "type": "array",
+          "maxItems": 5,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -678,10 +1166,12 @@
               },
               "count": {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1,
+                "maximum": 5
               },
               "rounds": {
                 "type": "array",
+                "minItems": 1,
                 "uniqueItems": true,
                 "items": {
                   "enum": [
@@ -696,7 +1186,80 @@
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "consensus"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "enum": [
+                  "Native",
+                  "Translated",
+                  "Mixed"
+                ]
+              },
+              "support": {
+                "minimum": 3
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "no_majority"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "const": null
+              },
+              "support": {
+                "minimum": 1,
+                "maximum": 2
+              },
+              "rounds_coded": {
+                "minimum": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "not_coded"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "const": null
+              },
+              "support": {
+                "const": 0
+              },
+              "rounds_coded": {
+                "const": 0
+              },
+              "votes": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
     },
     "decision_resource_tier": {
       "type": "object",
@@ -740,6 +1303,7 @@
         },
         "votes": {
           "type": "array",
+          "maxItems": 5,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -758,10 +1322,12 @@
               },
               "count": {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1,
+                "maximum": 5
               },
               "rounds": {
                 "type": "array",
+                "minItems": 1,
                 "uniqueItems": true,
                 "items": {
                   "enum": [
@@ -776,7 +1342,80 @@
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "consensus"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "enum": [
+                  "Low",
+                  "Medium",
+                  "High"
+                ]
+              },
+              "support": {
+                "minimum": 3
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "no_majority"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "const": null
+              },
+              "support": {
+                "minimum": 1,
+                "maximum": 2
+              },
+              "rounds_coded": {
+                "minimum": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "not_coded"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "const": null
+              },
+              "support": {
+                "const": 0
+              },
+              "rounds_coded": {
+                "const": 0
+              },
+              "votes": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
     },
     "decision_task_class": {
       "type": "object",
@@ -833,6 +1472,7 @@
         },
         "votes": {
           "type": "array",
+          "maxItems": 5,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -864,10 +1504,12 @@
               },
               "count": {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1,
+                "maximum": 5
               },
               "rounds": {
                 "type": "array",
+                "minItems": 1,
                 "uniqueItems": true,
                 "items": {
                   "enum": [
@@ -882,7 +1524,93 @@
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "consensus"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "enum": [
+                  "Pre-training",
+                  "Translation",
+                  "Instruction",
+                  "QA",
+                  "NLU",
+                  "Generation",
+                  "Other",
+                  "Syntax",
+                  "Reasoning",
+                  "Multimodal",
+                  "Summarization",
+                  "Math",
+                  "RAG",
+                  "Code",
+                  "Long Context",
+                  "Embeddings"
+                ]
+              },
+              "support": {
+                "minimum": 3
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "no_majority"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "const": null
+              },
+              "support": {
+                "minimum": 1,
+                "maximum": 2
+              },
+              "rounds_coded": {
+                "minimum": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "not_coded"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "const": null
+              },
+              "support": {
+                "const": 0
+              },
+              "rounds_coded": {
+                "const": 0
+              },
+              "votes": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
     },
     "decision_cultural_specificity": {
       "type": "object",
@@ -926,6 +1654,7 @@
         },
         "votes": {
           "type": "array",
+          "maxItems": 5,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -944,10 +1673,12 @@
               },
               "count": {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1,
+                "maximum": 5
               },
               "rounds": {
                 "type": "array",
+                "minItems": 1,
                 "uniqueItems": true,
                 "items": {
                   "enum": [
@@ -962,7 +1693,80 @@
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "consensus"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "enum": [
+                  "Universal",
+                  "Region-Specific",
+                  "Culturally Anchored"
+                ]
+              },
+              "support": {
+                "minimum": 3
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "no_majority"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "const": null
+              },
+              "support": {
+                "minimum": 1,
+                "maximum": 2
+              },
+              "rounds_coded": {
+                "minimum": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "not_coded"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "const": null
+              },
+              "support": {
+                "const": 0
+              },
+              "rounds_coded": {
+                "const": 0
+              },
+              "votes": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
     },
     "decision_inference_paradigm": {
       "type": "object",
@@ -983,7 +1787,6 @@
             "Retrieval-Augmented",
             "Mixed",
             "Other",
-            "confidence",
             null
           ]
         },
@@ -1009,6 +1812,7 @@
         },
         "votes": {
           "type": "array",
+          "maxItems": 5,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -1024,16 +1828,17 @@
                   "Generative",
                   "Retrieval-Augmented",
                   "Mixed",
-                  "Other",
-                  "confidence"
+                  "Other"
                 ]
               },
               "count": {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1,
+                "maximum": 5
               },
               "rounds": {
                 "type": "array",
+                "minItems": 1,
                 "uniqueItems": true,
                 "items": {
                   "enum": [
@@ -1048,7 +1853,82 @@
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "consensus"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "enum": [
+                  "Discriminative",
+                  "Generative",
+                  "Retrieval-Augmented",
+                  "Mixed",
+                  "Other"
+                ]
+              },
+              "support": {
+                "minimum": 3
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "no_majority"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "const": null
+              },
+              "support": {
+                "minimum": 1,
+                "maximum": 2
+              },
+              "rounds_coded": {
+                "minimum": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "not_coded"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "const": null
+              },
+              "support": {
+                "const": 0
+              },
+              "rounds_coded": {
+                "const": 0
+              },
+              "votes": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

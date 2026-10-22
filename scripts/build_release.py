@@ -8,9 +8,11 @@ release/:
 
   linguagapatlas.json         the whole atlas as a single JSON document
   linguagapatlas.jsonl        one resource per line (the same records)
-  linguagapatlas.sqlite       the same content as relational tables + views
+  linguagapatlas.sqlite       every source cell, votes, vocabularies and caveats
+                              as relational tables + views
   linguagapatlas.schema.json  JSON Schema for the document and each record
   croissant.json              Croissant (MLCommons) metadata for the files
+  README.md                   dataset card; its marked sections are generated
 
 Null rule: nothing is imputed. An empty source cell is written as null, and
 every source cell can be recovered verbatim from the release (round labels
@@ -18,9 +20,10 @@ are given both as written and in canonical form, normalized exactly as
 build_consensus.py normalizes them before voting).
 
 The build refuses to write anything if data/corpus.csv is not exactly what
-build_consensus.py produces from the five rounds, or if the vote recomputed
-here disagrees with any consensus cell. Output is deterministic: rebuilding
-from unchanged sources reproduces the JSON files byte for byte.
+build_consensus.py produces from the five rounds, if the vote recomputed here
+disagrees with any consensus cell, or if a label falls outside the data
+dictionary's vocabulary. Output is deterministic: rebuilding from unchanged
+sources reproduces every text file byte for byte.
 
 Usage:
     python3 scripts/build_release.py            # (re)write release/
@@ -56,20 +59,30 @@ SCREENING = "data/screening-log.csv"
 DICTIONARY = "data-dictionary.md"
 CITATION = "CITATION.cff"
 SUMMARY = "rounds-summary.md"
+README = "README.md"
 ROUNDS = ["A", "B", "C", "D", "E"]
 ROUND_FILE = "coding/coder{}-full.csv"
 OUT_DIR = "release"
+# Every file whose content reaches the release; their checksums go in `sources`.
+SOURCES = [CORPUS, *[ROUND_FILE.format(L) for L in ROUNDS], SCREENING, DICTIONARY,
+           CITATION, SUMMARY, README, "scripts/build_consensus.py",
+           "scripts/recompute.py", "scripts/agreement.py"]
 
 JSON_FILE = "linguagapatlas.json"
 JSONL_FILE = "linguagapatlas.jsonl"
 SQLITE_FILE = "linguagapatlas.sqlite"
 SCHEMA_FILE = "linguagapatlas.schema.json"
 CROISSANT_FILE = "croissant.json"
+CARD_FILE = "README.md"
 
-# Stated in README.md; the corpus artifact's own title comes from CITATION.cff.
+# Stated in README.md (checked at build time); the corpus artifact's own title
+# comes from CITATION.cff.
 PAPER_TITLE = ("LinguaGapAtlas: A Systematic Taxonomy of Bias and Imbalance in "
                "96 Multilingual AI Benchmarks & Datasets")
 PAPER_STATUS = "Prepared for submission to ACM FAccT 2027."
+# Quoted by the ai-coders caveat; the build fails if it leaves rounds-summary.md.
+AI_CODER_QUOTE = ("The second coders are AI agents; the paper must disclose this as AI "
+                  "second-coding / human–AI agreement, not two-human IAA.")
 REPOSITORY_URL = "https://github.com/sankalpjajee/LinguaGapAtlas"
 LICENSE_URLS = {"CC-BY-4.0": "https://creativecommons.org/licenses/by/4.0/",
                 "MIT": "https://opensource.org/licenses/MIT"}
@@ -105,6 +118,15 @@ ADDED_FIELDS = [
      "The five independent coding rounds' own records for this resource (A-E), with "
      "labels in canonical form and as written."),
 ]
+# Resource-level meaning of columns whose data-dictionary wording describes a
+# single coder's row rather than the consensus row.
+CONSENSUS_FIELD_DOCS = {
+    "coder": "Always 'consensus-5rounds': the row is the majority vote of the five "
+             "coding rounds. Each round's coder is its round letter (see rounds).",
+    "confidence": "Derived from the vote, not recorded by a coder: high when none of the "
+                  "voted label cells is split or without majority, medium for 1-2 such "
+                  "cells, low for 3 or more. Each round's own confidence is under rounds.",
+}
 
 
 class BuildError(Exception):
@@ -160,47 +182,59 @@ def read_cff(rel):
 
 
 def read_dictionary(rel):
-    """Field rows of data-dictionary.md's tables: {field: (type, description, tokens)}."""
+    """Field rows of data-dictionary.md's tables, keyed by field name."""
+    def clean(cell):
+        return cell.replace("\\|", "|").replace("`", "")
+
     fields = {}
     for line in (ROOT / rel).read_text(encoding="utf-8").splitlines():
         if not line.startswith("| `"):
             continue
         cells = [c.strip() for c in re.split(r"(?<!\\)\|", line)[1:-1]]
-        name = cells[0].strip("`")
-        tokens = re.findall(r"`([^`]+)`", " ".join(cells[1:]))
-
-        def clean(text):
-            return text.replace("\\|", "|").replace("`", "")
-        fields[name] = (clean(cells[1]), clean(cells[2]), tokens, cells[2])
+        fields[cells[0].strip("`")] = {"type": clean(cells[1]), "description": clean(cells[2]),
+                                       "type_raw": cells[1], "description_raw": cells[2]}
     return fields
 
 
 # ------------------------------------------------------------ vocabularies
 
+def dictionary_values(field, entry):
+    """The values data-dictionary.md lists for a label field, as {value: applies_to}."""
+    if field == "type":  # "`Benchmark` or `Dataset`. ..."
+        m = re.match(r"`([^`]+)` or `([^`]+)`", entry["description_raw"])
+        return {v: None for v in m.groups()} if m else {}
+    if field == "task_class":  # "... Benchmarks: `QA`, .... Datasets: `Pre-training`, ...."
+        m = re.search(r"Benchmarks:(.*?)\.\s*Datasets:(.*?)\.", entry["description_raw"])
+        if not m:
+            return {}
+        return {t: [typ] for group, typ in ((m.group(1), "Benchmark"), (m.group(2), "Dataset"))
+                for t in re.findall(r"`([^`]+)`", group)}
+    # The other dimensions list their values in the controlled-vocabulary cell only.
+    return {t: ["Benchmark", "Dataset"] for t in re.findall(r"`([^`]+)`", entry["type_raw"])}
+
+
 def build_vocabularies(dictionary):
     """{field: [{value, applies_to, listed_in_data_dictionary}]} in canonical order."""
     vocab = {}
     for field in LABEL_FIELDS:
+        listed = dictionary_values(field, dictionary[field])
+        if not listed:
+            raise BuildError(f"{DICTIONARY}: no vocabulary found for {field}")
         if field in build_consensus.CANON:
             values = list(build_consensus.CANON[field].values())
-        else:  # inference_paradigm: not voted by build_consensus.py
-            values = [t for t in dictionary[field][2] if t != "null"]
-        listed = set(dictionary[field][2])
-        applies = {}
-        if field == "task_class":
-            m = re.search(r"Benchmarks:(.*?)\.\s*Datasets:(.*?)\.", dictionary[field][3])
-            for group, typ in ((m.group(1), "Benchmark"), (m.group(2), "Dataset")):
-                for token in re.findall(r"`([^`]+)`", group):
-                    applies[token] = [typ]
-        vocab[field] = [{"value": v,
-                         "applies_to": applies.get(v, ["Benchmark", "Dataset"]
-                                                   if field != "task_class" else None),
-                         "listed_in_data_dictionary": v in listed}
-                        for v in values]
+        else:  # inference_paradigm is not voted by build_consensus.py
+            values = list(listed)
+        if field != "task_class" and set(values) != set(listed):
+            raise BuildError(f"{field}: vocabulary {values} differs from {DICTIONARY} "
+                             f"{sorted(listed)}")
+        if not set(listed) <= set(values):
+            raise BuildError(f"{field}: {DICTIONARY} lists values unknown to build_consensus.py")
+        vocab[field] = [{"value": v, "applies_to": listed.get(v),
+                         "listed_in_data_dictionary": v in listed} for v in values]
     return vocab
 
 
-def canonical(field, raw, vocab):
+def canonical(field, raw, vocab, where):
     """Canonical label for a raw cell, or None when undetermined."""
     v = build_consensus.coded({field: raw}, field)
     if v is None:
@@ -208,7 +242,7 @@ def canonical(field, raw, vocab):
     for entry in vocab[field]:
         if entry["value"].lower() == v:
             return entry["value"]
-    raise BuildError(f"{field}: value {raw!r} is outside the controlled vocabulary")
+    raise BuildError(f"{where}: {field} value {raw!r} is outside the controlled vocabulary")
 
 
 # ------------------------------------------------------------- converters
@@ -245,11 +279,12 @@ def is_count_only(entry):
 
 # --------------------------------------------------------------- consensus
 
-def decide(field, rows_by_round, vocab):
+def decide(rid, field, rows_by_round, vocab):
     order = {e["value"]: i for i, e in enumerate(vocab[field])}
     votes = {}
     for letter in ROUNDS:
-        value = canonical(field, rows_by_round[letter][field], vocab)
+        value = canonical(field, rows_by_round[letter][field], vocab,
+                          f"{ROUND_FILE.format(letter)} {rid}")
         if value is not None:
             votes.setdefault(value, []).append(letter)
     ranked = sorted(votes.items(), key=lambda kv: (-len(kv[1]), order[kv[0]]))
@@ -273,7 +308,9 @@ def check_corpus_is_consensus():
         cmd = [sys.executable, str(SCRIPTS / "build_consensus.py"), "--rounds",
                *[f"{L}={ROOT / ROUND_FILE.format(L)}" for L in ROUNDS],
                "--base", str(ROOT / ROUND_FILE.format("A")), "--out", str(out)]
-        subprocess.run(cmd, check=True, capture_output=True)
+        done = subprocess.run(cmd, capture_output=True, text=True)
+        if done.returncode != 0:
+            raise BuildError("build_consensus.py failed:\n" + done.stderr.strip())
         if out.read_bytes() != (ROOT / CORPUS).read_bytes():
             raise BuildError(f"{CORPUS} is not the output of build_consensus.py over "
                              "the five rounds; rebuild it before building the release")
@@ -282,10 +319,14 @@ def check_corpus_is_consensus():
 # -------------------------------------------------------------- documents
 
 def build_document():
-    for rel in [CORPUS, SCREENING, DICTIONARY, CITATION, SUMMARY,
-                *[ROUND_FILE.format(L) for L in ROUNDS]]:
+    for rel in SOURCES:
         if not (ROOT / rel).is_file():
             raise BuildError(f"missing source file {rel}")
+    if AI_CODER_QUOTE not in (ROOT / SUMMARY).read_text(encoding="utf-8"):
+        raise BuildError(f"{SUMMARY} no longer contains the sentence quoted by the "
+                         "ai-coders caveat; update AI_CODER_QUOTE")
+    if PAPER_TITLE not in (ROOT / README).read_text(encoding="utf-8"):
+        raise BuildError(f"{README} no longer states PAPER_TITLE; update it")
     check_corpus_is_consensus()
 
     dictionary = read_dictionary(DICTIONARY)
@@ -302,6 +343,9 @@ def build_document():
         rounds[letter] = {r["resource_id"]: r for r in rows}
     if len({r["resource_id"] for r in corpus}) != len(corpus):
         raise BuildError(f"{CORPUS}: duplicate resource_id")
+    missing_docs = [c for c in columns if c not in dictionary]
+    if missing_docs:
+        raise BuildError(f"{DICTIONARY} does not document {missing_docs}")
 
     resources = []
     for row in corpus:
@@ -313,7 +357,7 @@ def build_document():
                     raise BuildError(f"{rid} round {letter}: {col} differs from {CORPUS}")
             if rr["coder"] != letter:
                 raise BuildError(f"{rid} round {letter}: coder is {rr['coder']!r}")
-        consensus = {f: decide(f, by_round, vocab) for f in LABEL_FIELDS}
+        consensus = {f: decide(rid, f, by_round, vocab) for f in LABEL_FIELDS}
         for f in LABEL_FIELDS:
             if (consensus[f]["value"] or "") != row[f]:
                 raise BuildError(f"{rid} {f}: recomputed vote {consensus[f]['value']!r} "
@@ -349,7 +393,9 @@ def build_document():
         "name": "LinguaGapAtlas",
         "title": cff["title"],
         "version": cff["version"],
-        "description": cff["abstract"],
+        "date_released": cff.get("date-released"),
+        "doi": cff.get("doi"),
+        "description": describe(resources, len(candidates)),
         "keywords": cff["keywords"],
         "authors": [{"given_names": a.get("given-names"), "family_names": a.get("family-names"),
                      "orcid": a.get("orcid")} for a in cff["authors"]],
@@ -365,19 +411,17 @@ def build_document():
                       "resource's public documentation (or, for a consensus label, the rounds did "
                       "not reach a majority). Undetermined values are never imputed; exclude them "
                       "from a statistic's denominator and report their count."),
-        "sources": [{"path": rel, "sha256": sha256(ROOT / rel)}
-                    for rel in [CORPUS, *[ROUND_FILE.format(L) for L in ROUNDS],
-                                SCREENING, DICTIONARY, CITATION]],
+        "sources": [{"path": rel, "sha256": sha256(ROOT / rel)} for rel in SOURCES],
         "generator": "scripts/build_release.py",
         "fields": field_docs(columns, dictionary),
         "taxonomy": {
             "type": vocab["type"],
             "dimensions": [{"id": did, "field": f, "name": name,
-                            "definition": dictionary[f][1],
+                            "definition": dictionary[f]["description"],
                             "values": vocab[f]} for did, f, name in DIMENSIONS],
             "confidence": CONFIDENCE,
         },
-        "coding": coding_section(),
+        "coding": coding_section(columns),
         "statistics": statistics(corpus, rounds, resources, vocab),
         "caveats": [],
         "screening_log": {
@@ -393,36 +437,58 @@ def build_document():
 
 
 def round_record(rid, letter, row, columns, vocab):
+    where = f"{ROUND_FILE.format(letter)} {rid}"
     rec = {"round": letter, "resource_id": rid}
     for col in columns:
         if col in ROUND_INVARIANT:
             continue
         if col in LABEL_FIELDS:
-            rec[col] = canonical(col, row[col], vocab)
+            rec[col] = canonical(col, row[col], vocab, where)
         elif col in INT_FIELDS:
-            rec[col] = integer(row[col], f"{rid} round {letter} {col}")
+            rec[col] = integer(row[col], f"{where} {col}")
         else:
             rec[col] = text(row[col])
     rec["labels_as_written"] = {f: text(row[f]) for f in LABEL_FIELDS}
     return rec
 
 
+def describe(resources, candidate_count):
+    types = Counter(r["type"] for r in resources)
+    years = [r["year"] for r in resources if r["year"] is not None]
+    return (f"Machine-readable release of the LinguaGapAtlas corpus: {len(resources)} "
+            f"multilingual AI resources ({types['Benchmark']} benchmarks and "
+            f"{types['Dataset']} datasets under the five-round majority consensus; first "
+            f"released {min(years)}-{max(years)}) classified on five taxonomy dimensions (data "
+            "origin, linguistic resource tier, task class, cultural specificity, inference "
+            "paradigm). For every resource it gives the consensus labels (null = undetermined), "
+            "the votes of the five independent coding rounds behind each consensus cell, and "
+            "each round's own labels, evidence notes, sources and confidence; plus the taxonomy "
+            "and controlled vocabularies, statistics computed from the labels, and caveats to "
+            f"read before use. The screening log holds {candidate_count} candidate rows. The "
+            "codebook and scripts are in the source repository.")
+
+
 def citation_text(cff):
     names = [f"{a['family-names']}, {' '.join(p[0] + '.' for p in a['given-names'].replace('.', '').split())}"
              for a in cff["authors"]]
     who = ", ".join(names[:-1]) + ", & " + names[-1]
-    return (f"{who} {cff['title']} (corpus and reproducibility package, "
-            f"v{cff['version']}). {REPOSITORY_URL}")
+    year = f" ({cff['date-released'][:4]})." if cff.get("date-released") else ""
+    doi = f" https://doi.org/{cff['doi']}" if cff.get("doi") else ""
+    return (f"{who}{year} {cff['title']} (corpus and reproducibility package, "
+            f"v{cff['version']}). {REPOSITORY_URL}{doi}")
 
 
 def field_docs(columns, dictionary):
     docs = []
     for col in columns:
-        typ, desc = dictionary[col][0], dictionary[col][1]
+        typ, desc = dictionary[col]["type"], dictionary[col]["description"]
         if col in INT_FIELDS:
             typ = "integer | null"
-        docs.append({"field": col, "type": typ, "description": desc,
-                     "source": DICTIONARY})
+        elif col == "task_class":
+            typ = "enum (values in taxonomy D3)"
+        docs.append({"field": col, "type": typ,
+                     "description": CONSENSUS_FIELD_DOCS.get(col, desc),
+                     "source": "derived" if col in CONSENSUS_FIELD_DOCS else DICTIONARY})
         if col == "languages":
             docs += [{"field": f, "type": t, "description": d, "source": "derived"}
                      for f, t, d in ADDED_FIELDS[:2]]
@@ -431,7 +497,7 @@ def field_docs(columns, dictionary):
     return docs
 
 
-def coding_section():
+def coding_section(columns):
     return {
         "design": ("Five independent blind coding rounds (A-E), each coding all 96 resources "
                    "from primary sources under the same codebook (rounds-summary.md)."),
@@ -447,24 +513,30 @@ def coding_section():
             "labels": (f"type, data_origin, resource_tier, task_class and cultural_specificity "
                        f"take a value only when at least {MAJORITY} of the 5 rounds agree on it "
                        "after normalization; otherwise the cell is null. inference_paradigm is "
-                       "not voted on (every round left it undetermined)."),
-            "year": ("The most common year when at least 2 rounds report it, otherwise "
-                     "round A's year."),
-            "language_count": "The modal reported count; on a tie, the median reported count.",
-            "languages": ("The longest list among the rounds that reported the chosen count; "
-                          "round A's value when none did."),
-            "confidence": ("high when no voted cell is split or unresolved, medium for 1-2 "
-                           "such cells, low for 3 or more."),
-            "scaffold": ("canonical_reference, provenance_url, the screening fields and the "
-                         "evidence quoted in evidence_note are round A's (the base round)."),
+                       "not voted on: it is round A's cell (every round left it undetermined)."),
+            "year": ("A year reported by at least 2 rounds (on a tie, the one reported first "
+                     "in round order A-E); otherwise round A's cell."),
+            "language_count": ("The most frequently reported count; on a tie, element n//2 of "
+                               "all n reported counts in ascending order (the upper median); "
+                               "round A's cell when no round reports a count."),
+            "languages": ("Among the rounds that reported the chosen count, the longest "
+                          "languages text by characters (earliest round on ties), which can be "
+                          "a count statement such as '24 languages'; round A's cell when none "
+                          "of them has one."),
+            "confidence": ("high when none of the five voted label cells is split or without "
+                           "majority, medium for 1-2 such cells, low for 3 or more."),
+            "scaffold": ("resource_name, canonical_reference, provenance_url, the screening "
+                         "fields, inference_paradigm and the evidence quoted in evidence_note "
+                         "are round A's (the base round)."),
         },
+        "source_columns": columns,
+        "reconstruction": ("Each source CSV has source_columns in this order. corpus.csv is the "
+                           "resource-level fields; a round file is that round's records, with "
+                           "labels taken from labels_as_written, resource_id, resource_name and "
+                           "screening_status from the resource, and coder equal to the round "
+                           "letter. Write null as an empty cell."),
         "generator": "scripts/build_consensus.py",
     }
-
-
-def mean(values):
-    values = [v for v in values if v is not None]
-    return round(sum(values) / len(values), 4) if values else None
 
 
 def statistics(corpus, rounds, resources, vocab):
@@ -486,8 +558,9 @@ def statistics(corpus, rounds, resources, vocab):
     for L in ROUNDS:
         rows = list(rounds[L].values())
         for t in types:
-            group = [r for r in rows if canonical("type", r["type"], vocab) == t]
-            per_round += [{"round": L, **s} for s in shares(group, t)]
+            group = [r for r in rows
+                     if canonical("type", r["type"], vocab, ROUND_FILE.format(L)) == t]
+            per_round += [{"round": L, "type_basis": "round", **s} for s in shares(group, t)]
 
     distributions = {}
     for t in types:
@@ -507,24 +580,32 @@ def statistics(corpus, rounds, resources, vocab):
 
     agree = {}
     for f in LABEL_FIELDS:
-        pairs_out = []
+        raw = []
         for a, b in combinations(ROUNDS, 2):
-            pairs = [(canonical(f, rounds[a][r["resource_id"]][f], vocab),
-                      canonical(f, rounds[b][r["resource_id"]][f], vocab)) for r in corpus]
+            pairs = [(r["rounds"][ROUNDS.index(a)][f], r["rounds"][ROUNDS.index(b)][f])
+                     for r in resources]
             pairs = [p for p in pairs if p[0] is not None and p[1] is not None]
-            kappa = agreement.cohens_kappa(pairs)
-            pairs_out.append({
-                "rounds": f"{a}-{b}", "pairs": len(pairs),
-                "observed": round(sum(x == y for x, y in pairs) / len(pairs), 4) if pairs else None,
-                "kappa": round(kappa, 4) if kappa is not None else None})
-        agree[f] = {"mean_pairwise_kappa": mean(p["kappa"] for p in pairs_out),
-                    "mean_pairwise_observed": mean(p["observed"] for p in pairs_out),
-                    "pairwise": pairs_out}
+            raw.append((f"{a}-{b}", len(pairs),
+                        sum(x == y for x, y in pairs) / len(pairs) if pairs else None,
+                        agreement.cohens_kappa(pairs)))
+        kappas = [k for *_, k in raw if k is not None]
+        observed = [o for _, _, o, _ in raw if o is not None]
+        agree[f] = {
+            "mean_pairwise_kappa": round(sum(kappas) / len(kappas), 4) if kappas else None,
+            "mean_pairwise_observed": round(sum(observed) / len(observed), 4) if observed else None,
+            "pairwise": [{"rounds": p, "pairs": n,
+                          "observed": round(o, 4) if o is not None else None,
+                          "kappa": round(k, 4) if k is not None else None}
+                         for p, n, o, k in raw]}
 
     return {
         "note": ("Computed from this release's labels; shares exclude undetermined rows from "
-                 "the denominator (scripts/recompute.py). Agreement is Cohen's kappa over the "
-                 "10 round pairs on normalized labels, counting only resources both rounds coded."),
+                 "the denominator (scripts/recompute.py). headline_shares groups resources by "
+                 "their consensus type; headline_shares_by_round groups each round's rows by "
+                 "that round's own type label (type_basis 'round'), as recompute.py does when "
+                 "run on a round file. Agreement is Cohen's kappa over the 10 round pairs on "
+                 "normalized labels, counting only resources both rounds coded; the means are "
+                 "over the unrounded pairwise values."),
         "composition": composition,
         "headline_shares": headline,
         "headline_shares_by_round": per_round,
@@ -536,6 +617,7 @@ def statistics(corpus, rounds, resources, vocab):
 
 def caveats(doc, vocab):
     stats = doc["statistics"]
+    resources = doc["resources"]
     comp = stats["composition"]
     head = {(s["type"], s["field"]): s for s in stats["headline_shares"]}
 
@@ -543,33 +625,42 @@ def caveats(doc, vocab):
         s = head[(typ, field)]
         return f"{100 * s['hits'] / s['coded']:.1f}%" if s["coded"] else "undefined"
 
-    tier = stats["distributions"]
-    tier_coded = sum(sum(tier[t]["resource_tier"]["values"].values()) for t in tier)
-    tier_low = sum(tier[t]["resource_tier"]["values"]["Low"] for t in tier)
+    tier = stats["consensus_coverage"]["resource_tier"]
+    tier_values = Counter(r["resource_tier"] for r in resources if r["resource_tier"])
     unlisted = [e["value"] for e in vocab["task_class"] if not e["listed_in_data_dictionary"]]
-    used = {r["task_class"] for r in doc["resources"]}
-    count_only = sum(1 for r in doc["resources"]
-                     if r["languages"] and not r["languages_fully_named"])
-    no_languages = sum(1 for r in doc["resources"] if r["languages"] is None)
+    used = {r["task_class"] for r in resources}
+    applies = {e["value"]: e["applies_to"] for e in vocab["task_class"]}
+    off_type = [r for r in resources
+                if applies.get(r["task_class"]) and r["type"] not in applies[r["task_class"]]]
+    count_only = sum(1 for r in resources if r["languages"] and not r["languages_fully_named"])
+    no_languages = sum(1 for r in resources if r["languages"] is None)
+    years = [r["year"] for r in resources if r["year"] is not None]
+    voted = [f for f in LABEL_FIELDS if f != "inference_paradigm"]
+    a_differs = sum(1 for r in resources if any(
+        r["consensus"][f]["status"] == "consensus" and r["rounds"][0][f] is not None
+        and r["rounds"][0][f] != r[f] for f in voted))
+    reasons = sum(1 for r in resources if any(rr["screening_reason"] for rr in r["rounds"]))
     return [
         {"id": "ai-coders", "topic": "coding",
-         "text": ("rounds-summary.md states: \"The second coders are AI agents; the paper must "
-                  "disclose this as AI second-coding / human–AI agreement, not two-human IAA.\" "
-                  "This package does not record which rounds were coded by whom.")},
+         "text": (f"rounds-summary.md states: \"{AI_CODER_QUOTE}\" This package does not record "
+                  "which rounds were coded by whom.")},
         {"id": "differs-from-paper", "topic": "statistics",
          "text": (f"The consensus corpus has {comp['Benchmark']} benchmarks and "
                   f"{comp['Dataset']} datasets; the paper describes 65 and 31. Shares computed "
                   f"from this release for benchmarks (translated {pct('Benchmark', 'data_origin')}, "
                   f"Universal {pct('Benchmark', 'cultural_specificity')}, Low tier "
                   f"{pct('Benchmark', 'resource_tier')} of tier-coded rows) are not the published "
-                  "26.2%, 55.4% and 6.2% (see rounds-summary.md). Figures in this release are "
+                  "26.2%, 55.4% and 6.2% (see rounds-summary.md), and first-release years run "
+                  f"{min(years)}-{max(years)}, not 2018-2025. Figures in this release are "
                   "computed from the released labels.")},
         {"id": "tier-sparse", "topic": "resource_tier",
-         "text": (f"resource_tier is coded for {tier_coded} of {comp['total']} resources "
-                  f"({tier_low} Low, none Medium or High); the rest are undetermined because "
-                  "sources rarely state a tier. The low-resource share is not estimable from this "
-                  "release, and tier agreement (kappa 1.0 on a handful of jointly coded pairs) is "
-                  "not a reliability estimate.")},
+         "text": (f"resource_tier has a consensus value for {tier['consensus']} of {comp['total']} "
+                  f"resources ({', '.join(f'{n} {v}' for v, n in tier_values.items())}; no other "
+                  f"tier); {tier['no_majority']} more were coded by only 1-2 rounds (no "
+                  f"majority) and {tier['not_coded']} were left undetermined by every round, "
+                  "because sources rarely state a tier. The low-resource share is not estimable "
+                  "from this release, and tier agreement (kappa 1.0 on a handful of jointly "
+                  "coded pairs) is not a reliability estimate.")},
         {"id": "inference-paradigm-uncoded", "topic": "inference_paradigm",
          "text": ("inference_paradigm (D5) is null for every resource in the consensus and in "
                   "every round: the codebook does not enumerate its values "
@@ -583,15 +674,22 @@ def caveats(doc, vocab):
         {"id": "task-class-vocabulary", "topic": "task_class",
          "text": (f"task_class values {', '.join(v for v in unlisted if v in used)} occur in the "
                   "data but are not in data-dictionary.md's listed vocabulary (they belong to the "
-                  "13-class set in methods/codebook-draft.md, ambiguity A6). Each vocabulary "
-                  "entry carries listed_in_data_dictionary.")},
+                  "13-class set in methods/codebook-draft.md, ambiguity A6). data-dictionary.md "
+                  "lists task classes separately for benchmarks and datasets (applies_to), yet "
+                  f"{len(off_type)} resources carry a class listed only for the other type "
+                  f"({', '.join(r['resource_id'] for r in off_type)}; codebook ambiguity A9).")},
         {"id": "round-a-scaffold", "topic": "provenance",
-         "text": ("At resource level, canonical_reference, provenance_url and the evidence quoted "
-                  "in evidence_note are round A's (the consensus build's base round). Every "
-                  "round's own reference, URL, evidence note and confidence is under rounds.")},
+         "text": ("At resource level, canonical_reference, provenance_url, screening_reason and "
+                  "the evidence quoted in evidence_note are round A's (the consensus build's base "
+                  f"round). In {a_differs} resources round A coded a different value from the "
+                  "consensus for at least one voted label, so the quoted evidence can support a "
+                  "label other than the consensus one. screening_reason is null at resource level "
+                  f"because round A left it empty; other rounds record one for {reasons} "
+                  "resources. Every round's own reference, URL, evidence note, confidence and "
+                  "screening reason is under rounds.")},
         {"id": "consensus-confidence", "topic": "confidence",
          "text": ("Resource-level confidence is derived from the vote (high: no split or "
-                  "unresolved voted cell; medium: 1-2; low: 3 or more), not recorded by a coder. "
+                  "no-majority voted cell; medium: 1-2; low: 3 or more), not recorded by a coder. "
                   "Each round's own confidence is under rounds.")},
         {"id": "languages-count-only", "topic": "languages",
          "text": (f"{count_only} resources document their languages only partly or only as a "
@@ -610,37 +708,53 @@ def caveats(doc, vocab):
 # ------------------------------------------------------------ JSON Schema
 
 def build_schema(doc, vocab):
-    def enum(field):
-        return {"type": ["string", "null"], "enum": [e["value"] for e in vocab[field]] + [None]}
+    def enum(field, nullable=True):
+        values = [e["value"] for e in vocab[field]]
+        return ({"type": ["string", "null"], "enum": values + [None]} if nullable
+                else {"type": "string", "enum": values})
 
     s_text = {"type": ["string", "null"]}
-    s_int = {"type": ["integer", "null"]}
+    s_year = {"type": ["integer", "null"], "minimum": 1900, "maximum": 2100}
+    s_count = {"type": ["integer", "null"], "minimum": 1}
+    s_string = {"type": "string", "minLength": 1}
+    s_sha = {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+
+    def obj(props, required=None):
+        return {"type": "object", "additionalProperties": False,
+                "required": list(props) if required is None else required,
+                "properties": props}
+
     resource_props = {}
     for col in [f["field"] for f in doc["fields"]]:
         if col == "resource_id":
             s = {"$ref": "#/$defs/resource_id"}
         elif col == "resource_name":
-            s = {"type": "string"}
+            s = s_string
         elif col == "type":
-            s = {"enum": [e["value"] for e in vocab["type"]]}
+            s = enum("type", nullable=False)
         elif col in LABEL_FIELDS:
             s = enum(col)
-        elif col in INT_FIELDS:
-            s = s_int
+        elif col == "year":
+            s = s_year
+        elif col == "language_count":
+            s = s_count
+        elif col == "coder":
+            s = {"const": "consensus-5rounds"}
         elif col == "confidence":
             s = {"enum": CONFIDENCE}
         elif col == "screening_status":
             s = {"const": "included"}
         elif col == "language_names":
-            s = {"type": ["array", "null"], "items": {"type": "string"}}
+            s = {"type": ["array", "null"], "items": s_string}
         elif col == "languages_fully_named":
             s = {"type": "boolean"}
         elif col == "consensus":
-            s = {"type": "object", "additionalProperties": False, "required": LABEL_FIELDS,
-                 "properties": {f: {"$ref": f"#/$defs/decision_{f}"} for f in LABEL_FIELDS}}
+            s = obj({f: {"$ref": f"#/$defs/decision_{f}"} for f in LABEL_FIELDS})
         elif col == "rounds":
-            s = {"type": "array", "minItems": len(ROUNDS), "maxItems": len(ROUNDS),
-                 "items": {"$ref": "#/$defs/round"}}
+            s = {"type": "array", "minItems": len(ROUNDS),
+                 "prefixItems": [{"$ref": "#/$defs/round",
+                                  "properties": {"round": {"const": L}}} for L in ROUNDS],
+                 "items": False}
         else:
             s = s_text
         desc = next(f["description"] for f in doc["fields"] if f["field"] == col)
@@ -654,58 +768,104 @@ def build_schema(doc, vocab):
             s = {"$ref": "#/$defs/resource_id"}
         elif col in LABEL_FIELDS:
             s = enum(col)
-        elif col in INT_FIELDS:
-            s = s_int
+        elif col == "year":
+            s = s_year
+        elif col == "language_count":
+            s = s_count
         elif col == "confidence":
             s = {"type": ["string", "null"], "enum": CONFIDENCE + [None]}
         elif col == "labels_as_written":
-            s = {"type": "object", "additionalProperties": False, "required": LABEL_FIELDS,
-                 "properties": {f: s_text for f in LABEL_FIELDS},
+            s = {**obj({f: s_text for f in LABEL_FIELDS}),
                  "description": "The round's label strings exactly as written in its file."}
         else:
             s = s_text
         round_props[col] = s
 
+    vocab_list = {"type": "array", "items": obj({
+        "value": s_string,
+        "applies_to": {"type": ["array", "null"], "items": {"enum": ["Benchmark", "Dataset"]}},
+        "listed_in_data_dictionary": {"type": "boolean"}})}
     defs = {
-        "resource_id": {"type": "string", "pattern": r"^QG-\d{3}$"},
-        "resource": {"type": "object", "additionalProperties": False,
-                     "required": list(resource_props), "properties": resource_props},
-        "round": {"type": "object", "additionalProperties": False,
-                  "required": list(round_props), "properties": round_props},
+        "resource_id": {"type": "string", "pattern": "^QG-[0-9]{3}$"},
+        "resource": obj(resource_props),
+        "round": obj(round_props),
     }
     for f in LABEL_FIELDS:
         values = [e["value"] for e in vocab[f]]
         defs[f"decision_{f}"] = {
-            "type": "object", "additionalProperties": False,
-            "required": ["value", "status", "support", "rounds_coded", "split", "votes"],
-            "properties": {
+            **obj({
                 "value": {"enum": values + [None]},
                 "status": {"enum": ["consensus", "no_majority", "not_coded"]},
                 "support": {"type": "integer", "minimum": 0, "maximum": len(ROUNDS)},
                 "rounds_coded": {"type": "integer", "minimum": 0, "maximum": len(ROUNDS)},
                 "split": {"type": "boolean"},
-                "votes": {"type": "array", "items": {
-                    "type": "object", "additionalProperties": False,
-                    "required": ["value", "count", "rounds"],
-                    "properties": {"value": {"enum": values},
-                                   "count": {"type": "integer", "minimum": 1},
-                                   "rounds": {"type": "array", "uniqueItems": True,
-                                              "items": {"enum": ROUNDS}}}}}}}
+                "votes": {"type": "array", "maxItems": len(ROUNDS), "items": obj({
+                    "value": {"enum": values},
+                    "count": {"type": "integer", "minimum": 1, "maximum": len(ROUNDS)},
+                    "rounds": {"type": "array", "minItems": 1, "uniqueItems": True,
+                               "items": {"enum": ROUNDS}}})}}),
+            "allOf": [
+                {"if": {"properties": {"status": {"const": "consensus"}}},
+                 "then": {"properties": {"value": {"enum": values},
+                                         "support": {"minimum": MAJORITY}}}},
+                {"if": {"properties": {"status": {"const": "no_majority"}}},
+                 "then": {"properties": {"value": {"const": None},
+                                         "support": {"minimum": 1, "maximum": MAJORITY - 1},
+                                         "rounds_coded": {"minimum": 1}}}},
+                {"if": {"properties": {"status": {"const": "not_coded"}}},
+                 "then": {"properties": {"value": {"const": None}, "support": {"const": 0},
+                                         "rounds_coded": {"const": 0},
+                                         "votes": {"maxItems": 0}}}},
+            ]}
 
-    top_required = [k for k in doc if k != "$schema"]
+    top = {
+        "$schema": {"type": "string"},
+        "name": s_string, "title": s_string,
+        "version": {"type": "string", "pattern": r"^[0-9]+\.[0-9]+\.[0-9]+$"},
+        "date_released": {"type": ["string", "null"], "pattern": r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+        "doi": s_text,
+        "description": s_string,
+        "keywords": {"type": "array", "items": s_string},
+        "authors": {"type": "array", "minItems": 1, "items": obj(
+            {"given_names": s_string, "family_names": s_string, "orcid": s_text})},
+        "citation": s_string,
+        "paper": obj({"title": s_string, "status": s_string}),
+        "repository": s_string,
+        "license": obj({k: s_string for k in ("data", "data_url", "code", "code_url", "note")}),
+        "null_rule": s_string,
+        "sources": {"type": "array", "minItems": 1,
+                    "items": obj({"path": s_string, "sha256": s_sha})},
+        "generator": s_string,
+        "fields": {"type": "array", "items": obj(
+            {"field": s_string, "type": s_string, "description": s_string,
+             "source": s_string})},
+        "taxonomy": obj({
+            "type": vocab_list,
+            "dimensions": {"type": "array", "items": obj({
+                "id": {"type": "string", "pattern": "^D[1-5]$"}, "field": s_string,
+                "name": s_string, "definition": s_string, "values": vocab_list})},
+            "confidence": {"type": "array", "items": s_string}}),
+        "coding": {"type": "object", "required": list(doc["coding"])},
+        "statistics": {"type": "object", "required": list(doc["statistics"])},
+        "caveats": {"type": "array", "items": obj(
+            {"id": s_string, "topic": s_string, "text": s_string})},
+        "screening_log": obj({"source": s_string,
+                              "columns": {"type": "array", "items": s_string},
+                              "candidate_count": {"type": "integer", "minimum": 0},
+                              "candidates": {"type": "array", "items": {"type": "object"}}}),
+        "resources": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/resource"}},
+    }
+    if list(top) != list(doc):
+        raise BuildError("schema top-level keys are out of step with the document")
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": f"{REPOSITORY_URL}/release/{SCHEMA_FILE}",
         "title": f"{doc['name']} release document",
         "description": (f"Schema for {JSON_FILE} (the whole document) and, via "
-                        f"#/$defs/resource, for each line of {JSONL_FILE}."),
-        "type": "object",
-        "required": top_required,
-        "properties": {
-            "$schema": {"type": "string"},
-            "resources": {"type": "array", "items": {"$ref": "#/$defs/resource"}},
-            **{k: {} for k in top_required if k != "resources"},
-        },
+                        f"#/$defs/resource, for each line of {JSONL_FILE}. Invariants it cannot "
+                        "express (e.g. vote counts summing to rounds_coded, the consensus value "
+                        "matching the top-level label) are enforced by scripts/build_release.py."),
+        **obj({k: v for k, v in top.items()}, required=[k for k in top if k != "$schema"]),
         "$defs": defs,
     }
 
@@ -764,6 +924,9 @@ def build_croissant(doc, hashes):
               **({"references": {"field": {"@id": "resources/resource_id"}}}
                  if c == "resource_id" else {}))
         for c in round_cols]
+    dated = {"datePublished": doc["date_released"]} if doc["date_released"] else {}
+    doi = ({"identifier": f"https://doi.org/{doc['doi']}", "sameAs": f"https://doi.org/{doc['doi']}"}
+           if doc["doi"] else {})
     return {
         "@context": CROISSANT_CONTEXT,
         "@type": "sc:Dataset",
@@ -774,10 +937,15 @@ def build_croissant(doc, hashes):
         "creator": [{"@type": "sc:Person", "name": f"{a['given_names']} {a['family_names']}",
                      **({"sameAs": a["orcid"]} if a["orcid"] else {})}
                     for a in doc["authors"]],
+        **dated,
+        **doi,
         "keywords": doc["keywords"],
         "license": doc["license"]["data_url"],
         "url": doc["repository"],
         "version": doc["version"],
+        "rai:dataCollection": (doc["coding"]["design"] + " "
+                               + doc["coding"]["consensus_rules"]["labels"]),
+        "rai:dataLimitations": [c["text"] for c in doc["caveats"]],
         "distribution": [
             {"@type": "cr:FileObject", "@id": JSONL_FILE, "name": JSONL_FILE,
              "description": "One resource per line: consensus labels, votes and the five rounds.",
@@ -789,7 +957,9 @@ def build_croissant(doc, hashes):
              "contentUrl": JSON_FILE, "encodingFormat": "application/json",
              "sha256": hashes[JSON_FILE]},
             {"@type": "cr:FileObject", "@id": SQLITE_FILE, "name": SQLITE_FILE,
-             "description": "The same content as SQLite tables and views.",
+             "description": "Every source cell, the consensus votes, vocabularies, caveats and "
+                            "metadata as SQLite tables and views (statistics and consensus "
+                            "rules are in the JSON document).",
              "contentUrl": SQLITE_FILE, "encodingFormat": "application/vnd.sqlite3",
              "sha256": hashes[SQLITE_FILE]},
         ],
@@ -880,13 +1050,32 @@ CREATE VIEW split_cells AS
    WHERE c.split = 1;
 """
 
+SQL_DESCRIPTIONS = {
+    "resources": "The consensus corpus, one row per resource.",
+    "resource_languages": "One row per named language: resource_id, position, language.",
+    "round_labels": "Each round's record per resource (canonical labels).",
+    "round_labels_as_written": "Verbatim label strings from the round files (non-empty cells).",
+    "consensus": "The decision per resource and label field.",
+    "consensus_votes": "The votes behind each decision, with the rounds that cast them.",
+    "rounds": "Round letter, source file and checksum.",
+    "vocabulary": "The controlled vocabularies.",
+    "fields": "Field definitions.",
+    "caveats": "Known limitations (read before use).",
+    "metadata": "Artifact metadata and source checksums.",
+    "screening_candidates": "The screening log.",
+    "headline_shares": "View: translated, Universal and Low-tier shares by type, with hits, "
+                       "coded, undetermined and percent.",
+    "split_cells": "View: every cell on which the rounds disagreed, with the vote split.",
+}
+
 
 def write_sqlite(doc, path):
     con = sqlite3.connect(path)
     con.execute("PRAGMA foreign_keys = ON")
     con.executescript(SQL_SCHEMA)
     meta = {k: doc[k] for k in ("name", "title", "version", "description", "citation",
-                                "repository", "null_rule", "generator")}
+                                "repository", "null_rule", "generator", "date_released", "doi")
+            if doc[k] is not None}
     meta.update({"paper_title": doc["paper"]["title"], "license_data": doc["license"]["data"],
                  "license_code": doc["license"]["code"], "license_note": doc["license"]["note"],
                  "authors": "; ".join(f"{a['given_names']} {a['family_names']}"
@@ -935,9 +1124,79 @@ def write_sqlite(doc, path):
     problems = con.execute("PRAGMA foreign_key_check").fetchall()
     if problems:
         raise BuildError(f"SQLite foreign key violations: {problems[:5]}")
+    names = [n for (n,) in con.execute(
+        "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')")]
+    if set(names) != set(SQL_DESCRIPTIONS):
+        raise BuildError("SQL_DESCRIPTIONS is out of step with the SQLite schema")
+    counts = {n: con.execute(f"SELECT COUNT(*) FROM {n}").fetchone()[0] for n in SQL_DESCRIPTIONS}
     con.commit()
     con.execute("VACUUM")
     con.close()
+    return counts
+
+
+# ------------------------------------------------------------ dataset card
+
+def card_example(doc, rid="QG-034"):
+    """An abridged record taken from the data, for the dataset card."""
+    r = next(x for x in doc["resources"] if x["resource_id"] == rid)
+
+    def cut(s, n=60):
+        return s if s is None or len(s) <= n else s[:n].rstrip() + " ..."
+
+    ex = {k: (cut(v) if k in ("canonical_reference", "evidence_note") else v)
+          for k, v in r.items() if k not in ("consensus", "rounds")}
+    ex["consensus"] = {"data_origin": r["consensus"]["data_origin"],
+                       "...": "one entry per label field: " + ", ".join(LABEL_FIELDS)}
+    a = r["rounds"][0]
+    ex["rounds"] = [{"round": a["round"], "resource_id": a["resource_id"], "type": a["type"],
+                     "data_origin": a["data_origin"], "evidence_note": cut(a["evidence_note"]),
+                     "confidence": a["confidence"],
+                     "labels_as_written": {"data_origin": a["labels_as_written"]["data_origin"],
+                                           "...": "..."},
+                     "...": "..."},
+                    "... rounds B-E ..."]
+    return "```json\n" + compact_json(ex) + "\n```"
+
+
+def compact_json(obj, indent=0, width=96):
+    """Indented JSON that keeps any value fitting on one line on one line."""
+    one = json.dumps(obj, ensure_ascii=False)
+    if not isinstance(obj, (list, dict)) or len(one) + indent <= width:
+        return one
+    pad = " " * (indent + 2)
+    if isinstance(obj, dict):
+        items = [f"{pad}{json.dumps(k, ensure_ascii=False)}: {compact_json(v, indent + 2)}"
+                 for k, v in obj.items()]
+        return "{\n" + ",\n".join(items) + "\n" + " " * indent + "}"
+    return ("[\n" + ",\n".join(pad + compact_json(v, indent + 2) for v in obj)
+            + "\n" + " " * indent + "]")
+
+
+def card_blocks(doc, counts):
+    sqlite_rows = ["| Table / view | Rows | Contents |", "| --- | --- | --- |"]
+    sqlite_rows += [f"| `{n}` | {counts[n]} | {d} |" for n, d in SQL_DESCRIPTIONS.items()]
+    return {
+        "example-record": card_example(doc),
+        "sqlite-tables": "\n".join(sqlite_rows),
+        "caveats": "\n".join(f"- **`{c['id']}`**: {c['text']}" for c in doc["caveats"]),
+    }
+
+
+def render_card(doc, counts, out_dir):
+    """Refresh the generated sections of release/README.md into out_dir."""
+    template = (ROOT / OUT_DIR / CARD_FILE).read_text(encoding="utf-8")
+    front = template.split("---", 2)[1] if template.startswith("---") else ""
+    if f"path: {JSONL_FILE}" not in front or "split: corpus" not in front:
+        raise BuildError(f"{OUT_DIR}/{CARD_FILE}: YAML front matter must load {JSONL_FILE} "
+                         "as split 'corpus'")
+    for name, body in card_blocks(doc, counts).items():
+        pattern = re.compile(rf"(<!-- BEGIN GENERATED: {name} [^>]*-->\n)(?:.*?\n)?"
+                             rf"(<!-- END GENERATED: {name} -->)", re.S)
+        if not pattern.search(template):
+            raise BuildError(f"{OUT_DIR}/{CARD_FILE}: missing generated block '{name}'")
+        template = pattern.sub(lambda m: m.group(1) + body + "\n" + m.group(2), template)
+    (out_dir / CARD_FILE).write_text(template, encoding="utf-8")
 
 
 # ------------------------------------------------------------------ main
@@ -947,7 +1206,7 @@ def dumps(obj):
 
 
 def render(out_dir):
-    """Write every release file into out_dir; return {file: sha256}."""
+    """Write every release file into out_dir."""
     doc = build_document()
     vocab = {"type": doc["taxonomy"]["type"],
              **{d["field"]: d["values"] for d in doc["taxonomy"]["dimensions"]}}
@@ -960,10 +1219,11 @@ def render(out_dir):
     sqlite_path = out_dir / SQLITE_FILE
     if sqlite_path.exists():
         sqlite_path.unlink()
-    write_sqlite(doc, sqlite_path)
+    counts = write_sqlite(doc, sqlite_path)
     hashes = {f: sha256(out_dir / f) for f in (JSON_FILE, JSONL_FILE, SQLITE_FILE)}
     (out_dir / CROISSANT_FILE).write_text(dumps(build_croissant(doc, hashes)),
                                           encoding="utf-8")
+    render_card(doc, counts, out_dir)
     return doc
 
 
@@ -975,6 +1235,36 @@ def sqlite_dump(path):
         con.close()
 
 
+def stale_files(fresh, target):
+    stale = []
+    for f in (JSON_FILE, JSONL_FILE, SCHEMA_FILE, SQLITE_FILE, CARD_FILE):
+        if not (target / f).is_file():
+            stale.append(f"{f} (missing)")
+        elif f == SQLITE_FILE:
+            # Compared by content: file bytes depend on the SQLite version.
+            if sqlite_dump(fresh / f) != sqlite_dump(target / f):
+                stale.append(f)
+        elif (fresh / f).read_bytes() != (target / f).read_bytes():
+            stale.append(f)
+    if not (target / CROISSANT_FILE).is_file():
+        return stale + [f"{CROISSANT_FILE} (missing)"]
+    published = json.loads((target / CROISSANT_FILE).read_text(encoding="utf-8"))
+    # Every checksum croissant.json publishes must match the file it names.
+    for d in published["distribution"]:
+        if not (target / d["contentUrl"]).is_file() or \
+                sha256(target / d["contentUrl"]) != d["sha256"]:
+            stale.append(f"{CROISSANT_FILE} (sha256 of {d['contentUrl']})")
+    # The SQLite checksum can differ by SQLite version; compare the rest exactly.
+    expected = json.loads((fresh / CROISSANT_FILE).read_text(encoding="utf-8"))
+    for c in (expected, published):
+        for d in c["distribution"]:
+            if d["@id"] == SQLITE_FILE:
+                d["sha256"] = None
+    if expected != published:
+        stale.append(CROISSANT_FILE)
+    return stale
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true",
@@ -983,44 +1273,30 @@ def main(argv=None):
     target = ROOT / OUT_DIR
     try:
         if not args.check:
-            doc = render(target)
-            print(f"Wrote {OUT_DIR}/ ({len(doc['resources'])} resources):")
-            for f in (JSON_FILE, JSONL_FILE, SQLITE_FILE, SCHEMA_FILE, CROISSANT_FILE):
+            with tempfile.TemporaryDirectory() as tmp:
+                # Build completely before touching release/, so a failed build
+                # never leaves a half-written release behind.
+                render(Path(tmp))
+                target.mkdir(exist_ok=True)
+                for f in (JSON_FILE, JSONL_FILE, SCHEMA_FILE, SQLITE_FILE, CROISSANT_FILE,
+                          CARD_FILE):
+                    (target / f).write_bytes((Path(tmp) / f).read_bytes())
+            print(f"Wrote {OUT_DIR}/:")
+            for f in (JSON_FILE, JSONL_FILE, SQLITE_FILE, SCHEMA_FILE, CROISSANT_FILE,
+                      CARD_FILE):
                 print(f"  {f}")
+            print("Regenerate MANIFEST.sha256 before committing (see README.md).")
             return 0
         with tempfile.TemporaryDirectory() as tmp:
-            fresh = Path(tmp)
-            render(fresh)
-            stale = []
-            for f in (JSON_FILE, JSONL_FILE, SCHEMA_FILE, SQLITE_FILE):
-                if not (target / f).is_file():
-                    stale.append(f"{f} (missing)")
-                elif f == SQLITE_FILE:
-                    # Compared by content: file bytes depend on the SQLite version.
-                    if sqlite_dump(fresh / f) != sqlite_dump(target / f):
-                        stale.append(f)
-                elif (fresh / f).read_bytes() != (target / f).read_bytes():
-                    stale.append(f)
-            # croissant.json embeds the SQLite file's checksum, which can differ by
-            # SQLite version; compare it with that one checksum masked.
-            if not (target / CROISSANT_FILE).is_file():
-                stale.append(f"{CROISSANT_FILE} (missing)")
-            else:
-                def masked(p):
-                    c = json.loads(p.read_text(encoding="utf-8"))
-                    for d in c["distribution"]:
-                        if d["@id"] == SQLITE_FILE:
-                            d["sha256"] = None
-                    return c
-                if masked(fresh / CROISSANT_FILE) != masked(target / CROISSANT_FILE):
-                    stale.append(CROISSANT_FILE)
+            render(Path(tmp))
+            stale = stale_files(Path(tmp), target)
         if stale:
             print("release/ is out of date: " + ", ".join(stale), file=sys.stderr)
             print("run: python3 scripts/build_release.py", file=sys.stderr)
             return 1
         print(f"{OUT_DIR}/ is up to date with the source files.")
         return 0
-    except (BuildError, OSError, subprocess.CalledProcessError, KeyError) as exc:
+    except (BuildError, OSError, KeyError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
