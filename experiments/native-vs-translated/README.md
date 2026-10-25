@@ -57,7 +57,7 @@ python prepare.py                        # downloads everything, 5-10 minutes
 python analyze.py                        # writes analysis/report.md, pairs.csv, multiloko.csv
 ```
 
-`prepare.py` replaces the sets of any earlier run, so after `git pull` run it again, and delete `results/` if it holds runs of sets that have since changed.
+`prepare.py` replaces the sets of any earlier run, so after `git pull` run it again, and delete `results/` if it holds runs of sets that have since changed. For each set, `analyze.py` uses the newest complete run. It uses a `--limit` smoke test only when no complete run exists, and says so.
 
 **On SLURM:** edit the partition and environment lines in `slurm/eval.sbatch`, then:
 

@@ -37,17 +37,27 @@ HERE = Path(__file__).resolve().parent
 
 
 def load_samples(root):
-    """-> {task: {model: {question_id: sample}}}, keeping the newest run of each."""
-    newest = {}
+    """-> {task: {model: {question_id: sample}}}. For each model and task, keeps the
+    newest complete run. A --limit run (a smoke test) is used only when there is no
+    complete run, so a pilot never replaces full results, whenever it ran."""
+    limited, best = {}, {}
     for f in Path(root).rglob("samples_lga_*.jsonl"):
         model = f.parent.name
-        task = f.name[len("samples_"):].rsplit("_", 1)[0]  # samples_<task>_<timestamp>.jsonl
-        if (model, task) not in newest or f.name > newest[(model, task)].name:
-            newest[(model, task)] = f
+        task, stamp = f.name[len("samples_"):-len(".jsonl")].rsplit("_", 1)  # samples_<task>_<stamp>.jsonl
+        if (f.parent, stamp) not in limited:  # the run's results_<stamp>.json records its --limit
+            run = f.parent / f"results_{stamp}.json"
+            config = json.loads(run.read_text(encoding="utf-8")).get("config", {}) if run.exists() else {}
+            limited[(f.parent, stamp)] = config.get("limit") is not None
+        rank = (not limited[(f.parent, stamp)], stamp)
+        if (model, task) not in best or rank > best[(model, task)][0]:
+            best[(model, task)] = (rank, f)
     out = defaultdict(dict)
-    for (model, task), f in newest.items():
+    for (model, task), (_, f) in best.items():
         rows = (json.loads(line) for line in f.open(encoding="utf-8"))
         out[task][model] = {r["doc"]["id"]: r for r in rows}
+    pilots = sorted(f"{model}/{task}" for (model, task), ((complete, _), _) in best.items() if not complete)
+    if pilots:
+        print(f"warning: {len(pilots)} sets have only --limit (smoke-test) runs, e.g. {pilots[0]}")
     return out
 
 
