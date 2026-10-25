@@ -89,7 +89,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "a726349a1bf0c16ef4ab01784466d4f9998bb64f68401a0f1779a9079e671f7f"
+      "sha256": "8e19bf6f0e86150176167a18f5577f2c3a6f5a045a7c782455bd29580b0b9bbb"
     },
     {
       "path": "scripts/build_consensus.py",

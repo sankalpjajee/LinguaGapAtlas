@@ -1,0 +1,11 @@
+# Install PyTorch for your CUDA version first (https://pytorch.org), then:
+#   pip install -r requirements.txt
+lm-eval[hf]==0.4.13
+datasets>=3.0
+huggingface_hub>=0.24
+numpy
+jinja2
+# MultiLoKo's eval.py
+sacrebleu
+editdistance
+# Optional, several times faster: pip install vllm, then run with BACKEND=vllm

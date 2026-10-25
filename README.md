@@ -59,6 +59,7 @@ document is *not* evidence for any label.
 | `scripts/build_consensus.py` | Builds `data/corpus.csv` from the five coding rounds by majority vote (≥3 of 5). |
 | `release/` | The amalgamated research release, generated from the files above: `linguagapatlas.json`, `.jsonl`, `.sqlite`, `.schema.json`, `croissant.json`, and a dataset card (`release/README.md`). |
 | `scripts/build_release.py` | Builds `release/` from the source files; `--check` verifies that `release/` is current. |
+| `experiments/native-vs-translated/` | Runs language models on the corpus's natively written, culturally grounded benchmarks and on translated equivalents in the same languages, and compares the scores (see its `README.md`). It downloads the benchmark data at run time; none is stored here. |
 | `rounds-summary.md` | Results of the five coding rounds: per-round headline statistics, agreement across rounds, consensus coverage and caveats. |
 | `methods/` | The codebook draft (`codebook-draft.md`) and the inter-annotator agreement protocol (`iaa-protocol.md`). |
 | `CITATION.cff` | Machine-readable citation metadata for this artifact. |

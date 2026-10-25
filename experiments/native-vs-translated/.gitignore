@@ -1,0 +1,9 @@
+# Built or downloaded by prepare.py and run.sh. Never commit these: the source
+# licences (KMMLU is CC BY-ND, ArabicMMLU and CMMLU are CC BY-NC) and the MultiLoKo
+# and M3Exam authors' no-mirroring requests rule out redistributing the data.
+data/
+tasks/
+external/
+results/
+analysis/
+logs/

@@ -108,7 +108,7 @@
       "description": "The whole atlas as one JSON document (metadata, taxonomy, statistics, caveats and all resources).",
       "contentUrl": "linguagapatlas.json",
       "encodingFormat": "application/json",
-      "sha256": "322ca2a6a20f2aad4b71da89d6308ac4de22b879ccf2386ac772d1a43b65dbd2"
+      "sha256": "36968ac33d43a09103f5bbb530225dfb27ac7cfde1c3b31eaa8a0f3b63affac2"
     },
     {
       "@type": "cr:FileObject",
@@ -117,7 +117,7 @@
       "description": "Every source cell, the consensus votes, vocabularies, caveats and metadata as SQLite tables and views (statistics and consensus rules are in the JSON document).",
       "contentUrl": "linguagapatlas.sqlite",
       "encodingFormat": "application/vnd.sqlite3",
-      "sha256": "a907f6fa354833f90f09f4b21c8915c4ceecd58f075655c3fe8c35739d609c5d"
+      "sha256": "186c44fda375285b257966c931d8a14cf784eeb51f700f0c7dc28defa3d714be"
     }
   ],
   "recordSet": [

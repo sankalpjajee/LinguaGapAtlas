@@ -1,0 +1,4 @@
+model	label	extra_model_args
+# Hugging Face IDs checked 2026-10-25. Aya Expanse is gated: accept its licence on the Hub and set HF_TOKEN.
+CohereLabs/aya-expanse-8b	Aya Expanse 8B (instruction-tuned, 23 languages)
+marin-community/marin-8b-multilingual-base	Marin 8B multilingual (base; the Hub page has no model card)
