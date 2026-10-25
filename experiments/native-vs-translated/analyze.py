@@ -23,7 +23,9 @@ answer lists stored as one semicolon-joined string are split (see
 multiloko_reference). The locality effect per language is EM on locally
 sourced questions minus EM on English-sourced questions human-translated into
 the language, as MultiLoKo defines it: positive means the translated set
-underestimates the model, negative means it overestimates it.
+underestimates the model, negative means it overestimates it. Across languages
+the report gives the spread of that effect beyond sampling noise (see
+heterogeneity), since its mean can be near zero when errors run both ways.
 
 Usage: python analyze.py [--results results] [--reps 2000] [--seed 0]
 """
@@ -39,6 +41,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
+from scipy.stats import chi2
 
 HERE = Path(__file__).resolve().parent
 SEMICOLON = re.compile(r"[;；]")
@@ -117,6 +120,29 @@ def spearman(x, y):
 def paired_difference(runs, a, b):
     """Per question, model a's chance-corrected score minus model b's, on the questions both answered."""
     return [corrected(runs[a][q]) - corrected(runs[b][q]) for q in sorted(set(runs[a]) & set(runs[b]))]
+
+
+def heterogeneity(effects, ses):
+    """How much per-language effects spread: their SD across languages; the SD that
+    sampling noise alone would give (root mean square of their standard errors);
+    the SD beyond that noise (tau, method of moments); and Cochran's Q test of
+    whether all languages share one effect (inverse-variance weights, leaving out
+    effects with no sampling variance)."""
+    effects, ses = np.asarray(effects, dtype=float), np.asarray(ses, dtype=float)
+    sd = float(effects.std(ddof=1)) if len(effects) > 1 else float("nan")
+    noise = float(np.sqrt(np.mean(ses ** 2)))
+    tau = float(np.sqrt(max(0.0, sd ** 2 - noise ** 2))) if len(effects) > 1 else float("nan")
+    ok = ses > 0
+    q, df, p = float("nan"), int(ok.sum()) - 1, float("nan")
+    if df > 0:
+        w = 1 / ses[ok] ** 2
+        q = float(np.sum(w * (effects[ok] - np.sum(w * effects[ok]) / np.sum(w)) ** 2))
+        p = float(chi2.sf(q, df))
+    return {"sd": sd, "noise_sd": noise, "tau": tau, "q": q, "df": df, "p": p}
+
+
+def p_text(p):
+    return "p < 0.001" if p < 0.001 else f"p = {p:.3f}"
 
 
 def mc_pairs(manifest, samples, reps, rng):
@@ -290,9 +316,11 @@ def multiloko(manifest, samples, reps, rng):
             if not local or not human:
                 continue
             le = np.mean(local) - np.mean(human)
+            se = np.sqrt(np.var(local, ddof=1) / len(local) + np.var(human, ddof=1) / len(human))
             lo, hi = ci(bootstrap_means(local, reps, rng) - bootstrap_means(human, reps, rng))
             row = {"model": m, "language": language, "em_local": np.mean(local), "em_translated_human": np.mean(human),
-                   "locality_effect": le, "le_ci_low": lo, "le_ci_high": hi, "n_local": len(local), "n_human": len(human)}
+                   "locality_effect": le, "le_se": se, "le_ci_low": lo, "le_ci_high": hi,
+                   "n_local": len(local), "n_human": len(human)}
             rows.append(row)
             per_lang.append(row)
         if not per_lang:
@@ -301,13 +329,16 @@ def multiloko(manifest, samples, reps, rng):
         loc = np.array([r["em_local"] for r in per_lang])
         hum = np.array([r["em_translated_human"] for r in per_lang])
         rho = spearman(loc, hum) if len(per_lang) > 2 else float("nan")
+        h = heterogeneity(les, [r["le_se"] for r in per_lang])
         lines.append(f"\n### {m}\n")
         lines.append(f"- Languages: {len(per_lang)}. Mean EM: local {pct(loc.mean())}, translated {pct(hum.mean())}.")
-        lines.append(f"- Locality effect (local − translated): mean {100 * les.mean():+.1f}, mean absolute "
-                     f"{100 * np.abs(les).mean():.1f}, range {100 * les.min():+.1f} to {100 * les.max():+.1f} points; "
+        lines.append(f"- Spread of the locality effect (local − translated) across languages: SD {100 * h['sd']:.1f} "
+                     f"points, against {100 * h['noise_sd']:.1f} from sampling noise alone, so about "
+                     f"{100 * h['tau']:.1f} points of real variation between languages (Cochran's Q = {h['q']:.1f} on "
+                     f"{h['df']} df, {p_text(h['p'])}). Range {100 * les.min():+.1f} to {100 * les.max():+.1f} points; "
                      f"{int((les > 0).sum())} languages positive (translation underestimates), "
                      f"{int((les < 0).sum())} negative (translation overestimates); "
-                     f"{int((np.abs(les) >= 0.10).sum())} with |effect| ≥ 10 points.")
+                     f"{int((np.abs(les) >= 0.10).sum())} with |effect| ≥ 10 points. Mean {100 * les.mean():+.1f}.")
         lines.append(f"- Rank correlation of language difficulty, local vs translated: {rho:.2f}.\n")
         lines.append("| Language | Local EM | Translated EM | Locality effect [95% CI] |")
         lines.append("|---|---|---|---|")
@@ -427,19 +458,28 @@ def latex_multiloko(ml_rows, names):
                        tex_interval(r["locality_effect"], r["le_ci_low"], r["le_ci_high"])] if r else ["--"] * 3)
         out.append(" & ".join(cells) + " \\\\")
     out.append("\\midrule")
-    mean, absolute, rho = ["Mean"], ["Mean $|$effect$|$"], ["Spearman $\\rho$, local vs transl."]
+    sd, noise, tau, q = (["SD of the effect across languages"], ["\\quad expected from sampling noise"],
+                         ["\\quad beyond sampling noise ($\\tau$)"], ["Cochran's $Q$; $p$"])
+    mean, rho = ["Mean"], ["Spearman $\\rho$, local vs transl."]
     for m in models:
         rows = [r for r in ml_rows if r["model"] == m]
         les = np.array([r["locality_effect"] for r in rows])
         loc, hum = [r["em_local"] for r in rows], [r["em_translated_human"] for r in rows]
+        h = heterogeneity(les, [r["le_se"] for r in rows])
+        sd += ["", "", f"{100 * h['sd']:.1f}"]
+        noise += ["", "", f"{100 * h['noise_sd']:.1f}"]
+        tau += ["", "", f"{100 * h['tau']:.1f}"]
+        q += ["", "", f"{h['q']:.1f}; ${p_text(h['p']).replace(' ', '')}$"]
         mean += [f"{100 * np.mean(loc):.1f}", f"{100 * np.mean(hum):.1f}", f"${100 * les.mean():+.1f}$"]
-        absolute += ["", "", f"{100 * np.abs(les).mean():.1f}"]
         rho += ["", "", f"{spearman(loc, hum):.2f}" if len(rows) > 2 else "--"]
-    out += [" & ".join(row) + " \\\\" for row in (mean, absolute, rho)]
+    out += [" & ".join(row) + " \\\\" for row in (sd, noise, tau, q, mean, rho)]
     caption = ("MultiLoKo exact match (\\%) on locally sourced questions and on English-sourced questions "
                "human-translated into the same language, scored with MultiLoKo's own evaluation script. Effect is "
                "local minus translated, MultiLoKo's locality effect: positive means the translated set underestimates "
-               "the model. Brackets: 95\\% bootstrap intervals over questions. Answer lists that MultiLoKo's data "
+               "the model. Brackets: 95\\% bootstrap intervals over questions. Each language's effect rests on 250 "
+               "questions per set, so part of its spread across languages is sampling noise: the rows below the "
+               "languages give the SD that noise alone would produce, the SD beyond it ($\\tau$, method of moments), "
+               "and Cochran's $Q$ test of whether all languages share one effect. Answer lists that MultiLoKo's data "
                "stores as one semicolon-joined string, mostly in the simplified Mandarin translations, were split "
                "before scoring.")
     out += ["\\bottomrule", "\\end{tabular}", f"\\caption{{{caption}}}", "\\label{tab:multiloko}", "\\end{table*}"]

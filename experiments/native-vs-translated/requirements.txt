@@ -4,6 +4,7 @@ lm-eval[hf]==0.4.13
 datasets>=3.0
 huggingface_hub>=0.24
 numpy
+scipy
 jinja2
 # MultiLoKo's eval.py
 sacrebleu

@@ -115,8 +115,9 @@ Positive means the translated set underestimates the model; negative means it ov
 **A fix to MultiLoKo's reference answers.** At the pinned commit, 158 of the 250 simplified Mandarin human translations store their accepted answers as one string joined by semicolons (`76；76年；…`), so no answer can match them; 3 other scored questions have the same problem. `analyze.py` scores against a copy in which those strings are split into separate answers, and the report says how many it split.
 
 **MultiLoKo summary, across languages:**
-- mean and mean absolute locality effect;
-- how many languages go each way;
+- the spread of the locality effect across languages: its SD, and the SD that sampling noise alone would give, since each language has only 250 questions per set;
+- the SD beyond that noise, and Cochran's Q test of whether all languages share one effect;
+- how many languages go each way, and the mean effect, which can be near zero when the errors run both ways;
 - the rank correlation of language difficulty between local and translated questions.
 
 **Files in `analysis/`:**
