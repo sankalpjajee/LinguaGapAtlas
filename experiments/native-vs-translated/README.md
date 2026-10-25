@@ -70,6 +70,8 @@ python analyze.py                            # after both tasks finish
 - `BACKEND=vllm ./run.sh` is several times faster if vLLM is installed.
 - `TASK_GROUPS=lga_mc` or `TASK_GROUPS=lga_multiloko` runs one group only.
 - `ONLY=1` runs only the first model.
+- `BATCH_SIZE=8` fixes the multiple-choice batch size, which is `auto` by default. `GEN_BATCH_SIZE` sets MultiLoKo's, which is 16 by default. Generation never uses `auto`: lm-eval's probe tries batch 64 at the model's full context, and on a busy GPU it can crash instead of backing off.
+- **Free GPU memory:** run each model on a GPU nothing else is using. lm-eval's `auto` batch size takes what is free, so a shared GPU makes the run much slower. Check with `nvidia-smi`.
 - `python prepare.py --cap 3000` limits every multiple-choice set to 3,000 test questions, stratified by subject. That cuts the multiple-choice part to about a fifth. The gap intervals of the large pairs widen to roughly ±3 points.
 - `python prepare.py --only m3exam,farstail --skip-multiloko` builds only the named native benchmarks, each with its translated pair.
 
