@@ -54,7 +54,7 @@ export HF_TOKEN=...                      # needed for Aya Expanse
 python prepare.py                        # downloads everything, 5-10 minutes
 ./run.sh models.tsv --limit 5            # smoke test: 5 questions per set
 ./run.sh models.tsv                      # full run, both models
-python analyze.py                        # writes analysis/report.md, pairs.csv, comparisons.csv, multiloko.csv
+python analyze.py                        # writes analysis/: report.md, CSVs and LaTeX tables
 ```
 
 `prepare.py` replaces the sets of any earlier run, so after `git pull` run it again, and delete `results/` if it holds runs of sets that have since changed. For each set, `analyze.py` uses the newest complete run. It uses a `--limit` smoke test only when no complete run exists, and says so.
@@ -118,6 +118,11 @@ Positive means the translated set underestimates the model; negative means it ov
 - mean and mean absolute locality effect;
 - how many languages go each way;
 - the rank correlation of language difficulty between local and translated questions.
+
+**Files in `analysis/`:**
+- `report.md`: everything above.
+- `pairs.csv`, `comparisons.csv`, `multiloko.csv`: the same numbers, one row per model and pair, per model comparison, and per model and language.
+- `table_mc.tex`, `table_multiloko.tex`: tables ready for the paper, rewritten on every run, so regenerate them rather than edit them. They need `booktabs`, which `acmart` loads, and fit the full text width of ACM's two-column format (`table*`).
 
 ## Tested
 
