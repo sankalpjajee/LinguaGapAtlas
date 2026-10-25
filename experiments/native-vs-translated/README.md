@@ -28,7 +28,7 @@ Notes:
 
 **Most informative comparison:** MultiLoKo. It holds the benchmark fixed and changes only whether the questions were locally sourced or translated.
 
-**Main confound in the other pairs:** in every other pair, the native and translated sets differ in content and difficulty. Read their raw gaps together with whether the two sets pick the same best model.
+**Main confound in the other pairs:** in every other pair, the native and translated sets differ in content and difficulty. Read their raw gaps together with the model comparison: whether the translated set changes how far apart the models are, or which one is ahead.
 
 ## Models
 
@@ -54,7 +54,7 @@ export HF_TOKEN=...                      # needed for Aya Expanse
 python prepare.py                        # downloads everything, 5-10 minutes
 ./run.sh models.tsv --limit 5            # smoke test: 5 questions per set
 ./run.sh models.tsv                      # full run, both models
-python analyze.py                        # writes analysis/report.md, pairs.csv, multiloko.csv
+python analyze.py                        # writes analysis/report.md, pairs.csv, comparisons.csv, multiloko.csv
 ```
 
 `prepare.py` replaces the sets of any earlier run, so after `git pull` run it again, and delete `results/` if it holds runs of sets that have since changed. For each set, `analyze.py` uses the newest complete run. It uses a `--limit` smoke test only when no complete run exists, and says so.
@@ -93,9 +93,17 @@ python analyze.py                            # after both tasks finish
 
 ## What the analysis reports
 
-**Multiple-choice pairs.** For each model, accuracy on the native set and on its translated set. Scores are reported raw and chance-corrected, because option counts range from 2 to 5. The gap (translated minus native) comes with a 95% bootstrap interval over questions. The report also says whether the native and the translated set name the same best model.
+**Summary.** How many gaps are significant and in which direction. How many model comparisons reverse or significantly change between the native and the translated set.
 
-**Global-MMLU.** Accuracy on culturally agnostic vs culturally sensitive questions, for the 2,850 annotated questions per language.
+**Multiple-choice pairs.** For each model, accuracy on the native set and on its translated set. Scores are reported raw and chance-corrected, because option counts range from 2 to 5. The gap (translated minus native) comes with a 95% bootstrap interval over questions.
+
+**Model comparison, per pair** (`comparisons.csv`):
+- how far ahead one model is on the native set, and on the translated set, each with a 95% interval paired over questions (both models answer the same ones);
+- how much that difference changes, with an interval.
+
+A ranking counts as reversed only when the difference is significant on both sets. A near-tie that flips is reported as a reversal "not significantly".
+
+**Global-MMLU.** Accuracy on culturally agnostic vs culturally sensitive questions, for the 2,850 annotated questions per language. Most culturally sensitive questions come from the humanities and social sciences, which models find easier, so this gap mixes culture with subject. Global-MMLU's authors find the same.
 
 **MultiLoKo, per language and model.** Scored with MultiLoKo's own `eval.py`:
 - exact match on locally sourced questions;
@@ -103,6 +111,8 @@ python analyze.py                            # after both tasks finish
 - the locality effect (local minus translated), with an interval.
 
 Positive means the translated set underestimates the model; negative means it overestimates it.
+
+**A fix to MultiLoKo's reference answers.** At the pinned commit, 158 of the 250 simplified Mandarin human translations store their accepted answers as one string joined by semicolons (`76；76年；…`), so no answer can match them; 3 other scored questions have the same problem. `analyze.py` scores against a copy in which those strings are split into separate answers, and the report says how many it split.
 
 **MultiLoKo summary, across languages:**
 - mean and mean absolute locality effect;
@@ -114,6 +124,7 @@ Positive means the translated set underestimates the model; negative means it ov
 The pipeline was tested with lm-eval 0.4.13 in three ways:
 - lm-eval's dummy model on all 76 tasks;
 - a 135M-parameter model on CPU on all 76 tasks, covering both multiple choice and generation;
-- planted correct and incorrect answers on every question, whose gaps, best-model flips and MultiLoKo scores the analysis recovered exactly.
+- planted correct and incorrect answers on every question, whose gaps, ranking reversals and MultiLoKo scores the analysis recovered exactly;
+- synthetic models with chosen accuracies, for which the model comparison reported a clear same ranking, a clear reversal and a small-sample near-tie each as expected.
 
-It has not yet been run in full on the two 8B models.
+The two 8B models were run on 2× H100. Their multiple-choice runs used an earlier version of the task list, with 29 sets, which contains these 16 sets with identical questions and prompts.

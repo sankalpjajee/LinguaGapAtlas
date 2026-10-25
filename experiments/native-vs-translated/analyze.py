@@ -3,19 +3,24 @@
 
 Reads the lm-eval sample logs under results/ (run.sh writes them with
 --log_samples) and data/manifest.json (written by prepare.py), and writes
-analysis/report.md, analysis/pairs.csv and analysis/multiloko.csv.
+analysis/report.md, pairs.csv, comparisons.csv and multiloko.csv.
 
 Multiple-choice pairs. For each model, accuracy on the native set and on its
 translated set, raw and chance-corrected per question ((acc - chance) /
 (1 - chance), since option counts differ). The gap is translated minus native,
 chance-corrected, with a 95% bootstrap interval that resamples questions within
-each set. With two or more models, the report also says whether the native and
-the translated set pick the same best model. For Global-MMLU sets it adds the
-culturally agnostic (CA) minus culturally sensitive (CS) gap on the annotated
-questions.
+each set. With two or more models, each pair of models is compared on both sets:
+the difference between them (paired over questions, since both answer the same
+ones) and how that difference changes from the native to the translated set,
+each with a 95% bootstrap interval. A ranking counts as reversed only when the
+difference is significant on both sets. For Global-MMLU sets the report adds
+the culturally agnostic (CA) minus culturally sensitive (CS) gap on the
+annotated questions.
 
 MultiLoKo. Predictions are scored with MultiLoKo's own eval.py (exact match
-after its normalisation). The locality effect per language is EM on locally
+after its normalisation), against a copy of its reference answers in which
+answer lists stored as one semicolon-joined string are split (see
+multiloko_reference). The locality effect per language is EM on locally
 sourced questions minus EM on English-sourced questions human-translated into
 the language, as MultiLoKo defines it: positive means the translated set
 underestimates the model, negative means it overestimates it.
@@ -24,16 +29,19 @@ Usage: python analyze.py [--results results] [--reps 2000] [--seed 0]
 """
 import argparse
 import csv
+import itertools
 import json
+import re
 import subprocess
 import sys
 import tempfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
+SEMICOLON = re.compile(r"[;；]")
 
 
 def load_samples(root):
@@ -106,8 +114,13 @@ def spearman(x, y):
     return float(np.corrcoef(rx, ry)[0, 1])
 
 
+def paired_difference(runs, a, b):
+    """Per question, model a's chance-corrected score minus model b's, on the questions both answered."""
+    return [corrected(runs[a][q]) - corrected(runs[b][q]) for q in sorted(set(runs[a]) & set(runs[b]))]
+
+
 def mc_pairs(manifest, samples, reps, rng):
-    rows, lines = [], []
+    rows, comparisons, lines = [], [], []
     for pair in manifest["pairs"]:
         native = manifest["sets"][pair["native"]]
         for t_name in pair["translated"]:
@@ -120,7 +133,6 @@ def mc_pairs(manifest, samples, reps, rng):
             lines.append("| Model | Native acc | Translated acc | Native (chance-corr.) | Translated (chance-corr.) "
                          "| Gap, translated − native [95% CI] |")
             lines.append("|---|---|---|---|---|---|")
-            best = {}
             for m in models:
                 nat, tra = list(n_runs[m].values()), list(t_runs[m].values())
                 n_acc, t_acc = np.mean([float(s["acc"]) for s in nat]), np.mean([float(s["acc"]) for s in tra])
@@ -129,7 +141,6 @@ def mc_pairs(manifest, samples, reps, rng):
                             - bootstrap_means([corrected(s) for s in nat], reps, rng))
                 lo, hi = ci(reps_gap)
                 gap = t_cor - n_cor
-                best[m] = (n_cor, t_cor)
                 lines.append(f"| {m} | {pct(n_acc)} (n={len(nat)}) | {pct(t_acc)} (n={len(tra)}) | {pct(n_cor)} | "
                              f"{pct(t_cor)} | {100 * gap:+.1f} [{100 * lo:+.1f}, {100 * hi:+.1f}] |")
                 rows.append({"pair": pair["pair"], "language": pair["language"], "model": m,
@@ -139,12 +150,58 @@ def mc_pairs(manifest, samples, reps, rng):
                              "native_corrected": n_cor, "translated_corrected": t_cor,
                              "gap_corrected": gap, "gap_ci_low": lo, "gap_ci_high": hi,
                              "gap_raw": t_acc - n_acc})
-            if len(models) >= 2:
-                top_n = max(models, key=lambda m: best[m][0])
-                top_t = max(models, key=lambda m: best[m][1])
-                verdict = "the same model" if top_n == top_t else "**different models**"
-                lines.append(f"\nBest on the native set: {top_n}; best on the translated set: {top_t} ({verdict}).")
-    return rows, lines
+            if len(models) < 2:
+                continue
+            lines.append("\n| Models, ahead on the native set first | Native difference [95% CI] "
+                         "| Translated difference [95% CI] | Change [95% CI] |")
+            lines.append("|---|---|---|---|")
+            verdicts = []
+            for a, b in itertools.combinations(models, 2):
+                dn, dt = paired_difference(n_runs, a, b), paired_difference(t_runs, a, b)
+                if np.mean(dn) < 0:  # name first the model that is ahead on the native set
+                    a, b, dn, dt = b, a, [-d for d in dn], [-d for d in dt]
+                bn, bt = bootstrap_means(dn, reps, rng), bootstrap_means(dt, reps, rng)
+                (n_lo, n_hi), (t_lo, t_hi), (c_lo, c_hi) = ci(bn), ci(bt), ci(bt - bn)
+                d_n, d_t = float(np.mean(dn)), float(np.mean(dt))
+                if d_t < 0 and n_lo > 0 and t_hi < 0:
+                    verdict, text = "ranking reverses", "**the ranking reverses**, significantly on both sets"
+                elif d_t < 0:
+                    verdict, text = "reverses, not significantly", "the point estimates reverse, but not significantly on both sets"
+                else:
+                    verdict, text = "same ranking", "same ranking on both sets"
+                changed = c_lo > 0 or c_hi < 0
+                lines.append(f"| {a} − {b} | {100 * d_n:+.1f} [{100 * n_lo:+.1f}, {100 * n_hi:+.1f}] | "
+                             f"{100 * d_t:+.1f} [{100 * t_lo:+.1f}, {100 * t_hi:+.1f}] | "
+                             f"{100 * (d_t - d_n):+.1f} [{100 * c_lo:+.1f}, {100 * c_hi:+.1f}] |")
+                verdicts.append(f"{a} vs {b}: {text}; the difference between them changes by {100 * (d_t - d_n):+.1f} "
+                                f"points, {'a significant change' if changed else 'not significant'}.")
+                comparisons.append({"pair": pair["pair"], "language": pair["language"], "native_set": pair["native"],
+                                    "translated_set": t_name, "ahead_on_native": a, "other": b,
+                                    "native_difference": d_n, "native_ci_low": n_lo, "native_ci_high": n_hi,
+                                    "translated_difference": d_t, "translated_ci_low": t_lo, "translated_ci_high": t_hi,
+                                    "change": d_t - d_n, "change_ci_low": c_lo, "change_ci_high": c_hi,
+                                    "verdict": verdict, "change_significant": changed})
+            lines.append("")
+            lines.extend(verdicts)
+    return rows, comparisons, lines
+
+
+def summary(pair_rows, comparisons):
+    lines = ["## Summary\n"]
+    if pair_rows:
+        lower = sum(r["gap_ci_high"] < 0 for r in pair_rows)
+        higher = sum(r["gap_ci_low"] > 0 for r in pair_rows)
+        lines.append(f"- Translated minus native, per model and pair: {lower + higher} of {len(pair_rows)} gaps are "
+                     f"significant, {lower} lower on the translated set and {higher} higher.")
+    if comparisons:
+        reversed_ = sum(c["verdict"] == "ranking reverses" for c in comparisons)
+        weak = sum(c["verdict"] == "reverses, not significantly" for c in comparisons)
+        changed = sum(c["change_significant"] for c in comparisons)
+        lines.append(f"- Comparing models: the translated set reverses the ranking in {reversed_} of {len(comparisons)} "
+                     f"comparisons, significantly on both sets ({weak} more reverse in point estimates only), and "
+                     f"significantly changes the difference between the models in {changed}.")
+    lines.append("- Each interval is a 95% bootstrap interval for one comparison, not corrected for multiple comparisons.\n")
+    return lines
 
 
 def cs_ca(manifest, samples):
@@ -160,8 +217,35 @@ def cs_ca(manifest, samples):
                              f"{pct(np.mean(cs))} (n={len(cs)}) | {100 * (np.mean(ca) - np.mean(cs)):+.1f} |")
     if lines:
         lines = ["\n## Global-MMLU: culturally agnostic vs culturally sensitive questions\n",
+                 "Most culturally sensitive questions come from the humanities and social sciences, which models find "
+                 "easier than the STEM-heavy agnostic ones, so this gap mixes culture with subject. Global-MMLU's "
+                 "authors find the same and attribute it to the subject mix.\n",
                  "| Language | Model | CA acc | CS acc | CA − CS |", "|---|---|---|---|---|"] + lines
     return lines
+
+
+def multiloko_reference(src, dst, subset):
+    """Copies the reference answers MultiLoKo's eval.py reads (<language>/<subset>.jsonl
+    and <language>/<subset>_translated*.jsonl) from src to dst, splitting answer
+    lists stored as one semicolon-joined string. At the pinned commit, 158 of the
+    250 simplified Mandarin human translations store their answers that way, and
+    as one string no prediction can match them. Returns {eval.py set key: number
+    of questions split}."""
+    split = Counter()
+    for f in sorted(Path(src).glob(f"*/{subset}.jsonl")) + sorted(Path(src).glob(f"*/{subset}_translated*.jsonl")):
+        key = f.stem.replace(subset, f.parent.name)  # eval.py's name for the set
+        out = Path(dst) / f.parent.name / f.name
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with f.open(encoding="utf-8") as fin, out.open("w", encoding="utf-8") as fout:
+            for line in fin:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                if any(SEMICOLON.search(t) for t in row.get("targets", [])):
+                    row["targets"] = [p.strip() for t in row["targets"] for p in SEMICOLON.split(t) if p.strip()]
+                    split[key] += 1
+                fout.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return split
 
 
 def multiloko(manifest, samples, reps, rng):
@@ -171,8 +255,11 @@ def multiloko(manifest, samples, reps, rng):
         return [], []
     models = sorted({m for s in ml_sets.values() for m in samples.get(s["task"], {})})
     rows, lines = [], ["\n## MultiLoKo: locally sourced vs English-sourced, human-translated questions\n"]
-    for m in models:
-        with tempfile.TemporaryDirectory() as tmp:
+    results = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        reference = Path(tmp) / "reference"
+        split = multiloko_reference(info["data"], reference, info["subset"])
+        for m in models:
             preds, scores = Path(tmp) / "predictions.jsonl", Path(tmp) / "scores.json"
             with preds.open("w", encoding="utf-8") as f:
                 for meta in ml_sets.values():
@@ -181,9 +268,16 @@ def multiloko(manifest, samples, reps, rng):
                         f.write(json.dumps({"language": s["doc"]["multiloko_key"], "id": s["doc"]["id"],
                                             "prediction": text if isinstance(text, str) else str(text)},
                                            ensure_ascii=False) + "\n")
-            subprocess.run([sys.executable, str(Path(info["repo"]) / "eval.py"), "-d", info["data"],
+            subprocess.run([sys.executable, str(Path(info["repo"]) / "eval.py"), "-d", str(reference),
                             "-s", info["subset"], "-p", str(preds), "-o", str(scores)], check=True)
-            result = json.loads(scores.read_text(encoding="utf-8"))
+            results[m] = json.loads(scores.read_text(encoding="utf-8"))
+    split = Counter({k: n for k, n in split.items() if k in {s["multiloko_key"] for s in ml_sets.values()}})
+    if split:
+        (top, n_top), = split.most_common(1)
+        lines.append(f"In MultiLoKo's data, {sum(split.values())} of the questions scored here store their accepted "
+                     f"answers as one semicolon-joined string ({n_top} of them in {top}). No answer could match such "
+                     "a string, so it is split into separate answers before scoring.")
+    for m, result in results.items():
 
         def em(key):
             per = [v["em"] for k, v in result.get(key, {}).items() if isinstance(v, dict) and "em" in v]
@@ -246,18 +340,22 @@ def main():
     rng = np.random.default_rng(args.seed)
     out = Path(args.out)
     out.mkdir(exist_ok=True)
-    pair_rows, pair_lines = mc_pairs(manifest, samples, args.reps, rng)
+    pair_rows, comparisons, pair_lines = mc_pairs(manifest, samples, args.reps, rng)
     ml_rows, ml_lines = multiloko(manifest, samples, args.reps, rng)
     report = ["# Native vs translated: same models, same harness, same prompt\n",
               "Gaps are translated minus native, in chance-corrected points; intervals are 95% bootstrap "
               "intervals over questions. Native and translated sets differ in content and difficulty, so a "
-              "raw gap alone is not evidence of over- or understatement: read it together with the best-model "
-              "comparison and the MultiLoKo locality effect, which holds the benchmark fixed.\n",
-              "## Multiple-choice pairs"] + pair_lines + cs_ca(manifest, samples) + ml_lines
+              "raw gap alone is not evidence of over- or understatement: read it together with the model "
+              "comparison, which asks whether the translated set changes how the models compare, and with the "
+              "MultiLoKo locality effect, which holds the benchmark fixed.\n"]
+    report += summary(pair_rows, comparisons) + ["## Multiple-choice pairs"] + pair_lines
+    report += cs_ca(manifest, samples) + ml_lines
     (out / "report.md").write_text("\n".join(report) + "\n", encoding="utf-8")
     write_csv(out / "pairs.csv", pair_rows)
+    write_csv(out / "comparisons.csv", comparisons)
     write_csv(out / "multiloko.csv", ml_rows)
-    print(f"wrote {out / 'report.md'} ({len(pair_rows)} pair rows, {len(ml_rows)} MultiLoKo rows)")
+    print(f"wrote {out / 'report.md'} ({len(pair_rows)} pair rows, {len(comparisons)} model comparisons, "
+          f"{len(ml_rows)} MultiLoKo rows)")
 
 
 if __name__ == "__main__":
