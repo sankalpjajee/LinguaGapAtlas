@@ -5,7 +5,7 @@ Reads the lm-eval sample logs under results/ (run.sh writes them with
 --log_samples) and data/manifest.json (written by prepare.py), and writes
 analysis/report.md, analysis/pairs.csv and analysis/multiloko.csv.
 
-Multiple-choice pairs. For each model, accuracy on the native set and on each
+Multiple-choice pairs. For each model, accuracy on the native set and on its
 translated set, raw and chance-corrected per question ((acc - chance) /
 (1 - chance), since option counts differ). The gap is translated minus native,
 chance-corrected, with a 95% bootstrap interval that resamples questions within
@@ -16,8 +16,8 @@ questions.
 
 MultiLoKo. Predictions are scored with MultiLoKo's own eval.py (exact match
 after its normalisation). The locality effect per language is EM on locally
-sourced questions minus EM on English-sourced questions translated into the
-language, as MultiLoKo defines it: positive means the translated set
+sourced questions minus EM on English-sourced questions human-translated into
+the language, as MultiLoKo defines it: positive means the translated set
 underestimates the model, negative means it overestimates it.
 
 Usage: python analyze.py [--results results] [--reps 2000] [--seed 0]
@@ -160,7 +160,7 @@ def multiloko(manifest, samples, reps, rng):
     if not ml_sets or not info:
         return [], []
     models = sorted({m for s in ml_sets.values() for m in samples.get(s["task"], {})})
-    rows, lines = [], ["\n## MultiLoKo: locally sourced vs English-sourced translated questions\n"]
+    rows, lines = [], ["\n## MultiLoKo: locally sourced vs English-sourced, human-translated questions\n"]
     for m in models:
         with tempfile.TemporaryDirectory() as tmp:
             preds, scores = Path(tmp) / "predictions.jsonl", Path(tmp) / "scores.json"
@@ -183,13 +183,11 @@ def multiloko(manifest, samples, reps, rng):
         for language in sorted({s["language"] for s in ml_sets.values()}):
             local = em(language)
             human = em(f"english_translated_human_{language}")
-            machine = em(f"english_translated_machine_{language}")
             if not local or not human:
                 continue
             le = np.mean(local) - np.mean(human)
             lo, hi = ci(bootstrap_means(local, reps, rng) - bootstrap_means(human, reps, rng))
             row = {"model": m, "language": language, "em_local": np.mean(local), "em_translated_human": np.mean(human),
-                   "em_translated_machine": np.mean(machine) if machine else float("nan"),
                    "locality_effect": le, "le_ci_low": lo, "le_ci_high": hi, "n_local": len(local), "n_human": len(human)}
             rows.append(row)
             per_lang.append(row)
@@ -198,24 +196,20 @@ def multiloko(manifest, samples, reps, rng):
         les = np.array([r["locality_effect"] for r in per_lang])
         loc = np.array([r["em_local"] for r in per_lang])
         hum = np.array([r["em_translated_human"] for r in per_lang])
-        mach = np.array([r["em_translated_machine"] for r in per_lang])
         rho = spearman(loc, hum) if len(per_lang) > 2 else float("nan")
         lines.append(f"\n### {m}\n")
-        lines.append(f"- Languages: {len(per_lang)}. Mean EM: local {pct(loc.mean())}, translated (human) {pct(hum.mean())},"
-                     f" translated (machine) {pct(np.nanmean(mach))}.")
+        lines.append(f"- Languages: {len(per_lang)}. Mean EM: local {pct(loc.mean())}, translated {pct(hum.mean())}.")
         lines.append(f"- Locality effect (local − translated): mean {100 * les.mean():+.1f}, mean absolute "
                      f"{100 * np.abs(les).mean():.1f}, range {100 * les.min():+.1f} to {100 * les.max():+.1f} points; "
                      f"{int((les > 0).sum())} languages positive (translation underestimates), "
                      f"{int((les < 0).sum())} negative (translation overestimates); "
                      f"{int((np.abs(les) >= 0.10).sum())} with |effect| ≥ 10 points.")
-        lines.append(f"- Rank correlation of language difficulty, local vs translated: {rho:.2f}.")
-        lines.append(f"- Human minus machine translation: mean {100 * np.nanmean(hum - mach):+.1f} points.\n")
-        lines.append("| Language | Local EM | Translated EM (human) | Translated EM (machine) | Locality effect [95% CI] |")
-        lines.append("|---|---|---|---|---|")
+        lines.append(f"- Rank correlation of language difficulty, local vs translated: {rho:.2f}.\n")
+        lines.append("| Language | Local EM | Translated EM | Locality effect [95% CI] |")
+        lines.append("|---|---|---|---|")
         for r in sorted(per_lang, key=lambda r: r["locality_effect"]):
             lines.append(f"| {r['language']} | {pct(r['em_local'])} | {pct(r['em_translated_human'])} | "
-                         f"{pct(r['em_translated_machine'])} | {100 * r['locality_effect']:+.1f} "
-                         f"[{100 * r['le_ci_low']:+.1f}, {100 * r['le_ci_high']:+.1f}] |")
+                         f"{100 * r['locality_effect']:+.1f} [{100 * r['le_ci_low']:+.1f}, {100 * r['le_ci_high']:+.1f}] |")
     return rows, lines
 
 

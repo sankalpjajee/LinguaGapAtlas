@@ -1,26 +1,25 @@
 #!/usr/bin/env python3
-"""Build the native-vs-translated evaluation: download each native, culturally
-grounded benchmark in the LinguaGapAtlas corpus and its closest translated
+"""Build the native-vs-translated evaluation: download each of the eight native,
+culturally grounded benchmarks in the LinguaGapAtlas corpus and one translated
 equivalent in the same language, normalise both to one schema, and write the
 lm-eval task files that score them with one prompt format.
 
-Pairs (native -> translated, same language):
+The eight pairs (native -> translated, same language):
   ArabicMMLU ar        -> Global-MMLU ar
   CMMLU zh             -> Global-MMLU zh
   TurkishMMLU tr       -> Global-MMLU tr
   KMMLU ko             -> Global-MMLU ko
-  M3Exam zh/it/pt/vi/sw -> Global-MMLU (same language); zh/vi/th also -> SeaExam's
-                          Google-translated MMLU; af -> MMLU-ProX af (10 options)
+  M3Exam pt, sw        -> Global-MMLU pt, sw (two of M3Exam's nine languages)
+  SeaExam id (native Indonesian exams) -> Global-MMLU id: a Southeast Asian
+                          stand-in, because SEACrowd is a data hub with no single
+                          test set and cannot be run as one benchmark
   FarsTail fa (NLI)    -> ParsiNLU entailment, MNLI machine-translated into Persian
-  MultiLoKo, 30 langs  -> MultiLoKo's English-sourced questions translated into the
-                          same language (human and machine translations)
-  SeaExam id (native Indonesian exams) -> SeaExam Google-translated MMLU id: a
-                          Southeast Asian stand-in, because SEACrowd is a data hub
-                          with no single test set and cannot be run as one benchmark
+  MultiLoKo, 30 langs  -> MultiLoKo's English-sourced questions, human-translated
+                          into the same language
 
 Writes data/ (normalised JSONL, never to be redistributed), tasks/ (lm-eval YAML)
-and data/manifest.json (the pairs analyze.py compares). External repositories go
-in external/. Usage:
+and data/manifest.json (the pairs analyze.py compares), replacing the sets of any
+earlier run. External repositories go in external/. Usage:
 
   python prepare.py                 # everything
   python prepare.py --cap 3000      # at most 3,000 test questions per set
@@ -126,9 +125,9 @@ def turkishmmlu(split):
     return out
 
 
-M3EXAM_LANGS = {"zh": "chinese", "it": "italian", "pt": "portuguese", "vi": "vietnamese",
-                "th": "thai", "sw": "swahili", "af": "afrikaans"}
-THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
+# Two of M3Exam's languages, both with a human-translated Global-MMLU set; Swahili
+# is low-resource.
+M3EXAM_LANGS = {"pt": "portuguese", "sw": "swahili"}
 M3EXAM_LABEL = re.compile(r"^\s*[\(（]?\s*([A-Za-z]|\d{1,2})\s*[\)）.．、:：]\s*")
 
 
@@ -145,19 +144,19 @@ def m3exam_zip(path_arg):
 
 
 def m3exam(lang, split, archive):
-    """Text-only M3Exam questions. Option labels ("(1)", "A.", "a)", Thai digits)
-    are stripped and the answer mapped to the option it names."""
+    """Text-only M3Exam questions. Option labels ("(1)", "A.", "a)") are stripped
+    and the answer mapped to the option it names."""
     rows = json.loads(archive.read(f"data/text-question/{M3EXAM_LANGS[lang]}-questions-{split}.json",
                                    pwd=M3EXAM_PASSWORD))
     out, skipped = [], 0
     for r in rows:
         options, labels = [], []
         for o in as_list(r["options"]):
-            o = str(o).translate(THAI_DIGITS)
+            o = str(o)
             m = M3EXAM_LABEL.match(o)
             labels.append(m.group(1).lower() if m else None)
             options.append(o[m.end():] if m else o)
-        answer = str(r["answer_text"]).strip().translate(THAI_DIGITS).lower().strip("().")
+        answer = str(r["answer_text"]).strip().lower().strip("().")
         if answer in labels:
             gold = labels.index(answer)
         elif answer.isdigit() and 1 <= int(answer) <= len(options):
@@ -218,20 +217,6 @@ def global_mmlu(lang, split):
     return out
 
 
-def mmlu_prox(lang, split):
-    hf_split = {"test": "test", "dev": "validation"}[split]
-    out = []
-    for r in load_dataset("li-lab/MMLU-ProX", lang, split=hf_split):
-        # Drop only trailing missing options: answer_index counts positions, and
-        # "None" can be a real option (in Python questions, for instance).
-        options = [r[f"option_{i}"] for i in range(10)]
-        while options and (options[-1] is None or not str(options[-1]).strip()):
-            options.pop()
-        out.append(item(r["question"], ["" if o is None else o for o in options], int(r["answer_index"]),
-                        r["category"]))
-    return out
-
-
 # ---------------------------------------------------------------------- MultiLoKo
 
 def load_module(name, path):
@@ -242,8 +227,9 @@ def load_module(name, path):
 
 
 def multiloko_sets(repo_arg):
-    """Local vs English-sourced-translated questions per language, as complete
-    5-shot prompts built with MultiLoKo's own templates and few-shot examples."""
+    """Locally sourced vs English-sourced, human-translated questions per language,
+    as complete 5-shot prompts built with MultiLoKo's own templates and few-shot
+    examples."""
     repo = Path(repo_arg) if repo_arg else EXTERNAL / "multiloko"
     if not (repo / ".git").exists() and not (repo / "eval.py").exists():
         EXTERNAL.mkdir(exist_ok=True)
@@ -275,9 +261,8 @@ def multiloko_sets(repo_arg):
         if language == "english":
             continue
         sets[(language, "local")] = (language, build(read(data / language / "dev.jsonl"), language))
-        for kind in ("human", "machine"):
-            key = f"english_translated_{kind}_{language}"  # the key MultiLoKo's eval.py uses
-            sets[(language, kind)] = (key, build(read(data / "english" / f"dev_translated_{kind}_{language}.jsonl"), language))
+        key = f"english_translated_human_{language}"  # the key MultiLoKo's eval.py uses
+        sets[(language, "human")] = (key, build(read(data / "english" / f"dev_translated_human_{language}.jsonl"), language))
     return repo, sets
 
 
@@ -305,11 +290,14 @@ metadata:
 
 GEN_TEMPLATE = """\
 # MultiLoKo: the prompt already holds MultiLoKo's own 5-shot template; greedy, one line.
+# lm-eval's exact_match is a quick check against one answer (the first non-blank one:
+# a few items list a blank answer first); analyze.py scores every accepted answer with
+# MultiLoKo's own eval.py.
 output_type: generate_until
 test_split: test
 num_fewshot: 0
 doc_to_text: "{{prompt}}"
-doc_to_target: "{{targets[0]}}"
+doc_to_target: "{{targets | select | first}}"
 generation_kwargs:
   until: ["\\n"]
   max_gen_toks: 64
@@ -365,16 +353,21 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--cap", type=int, default=0, help="max test questions per multiple-choice set (0 = all)")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--only", help="comma list of families: arabicmmlu,cmmlu,turkishmmlu,kmmlu,"
-                    "m3exam,seaexam,farstail,globalmmlu,mmluprox")
+    families = ("arabicmmlu", "cmmlu", "turkishmmlu", "kmmlu", "m3exam", "seaexam", "farstail")
+    ap.add_argument("--only", help="comma list of native benchmarks, each built with its translated pair: "
+                    + ",".join(families))
     ap.add_argument("--skip-multiloko", action="store_true")
     ap.add_argument("--m3exam-zip", help="path to m3exam-data.zip if already downloaded")
     ap.add_argument("--multiloko-repo", help="path to a MultiLoKo checkout if already cloned")
     args = ap.parse_args()
     only = set(args.only.split(",")) if args.only else None
+    if only and not only <= set(families):
+        ap.error(f"--only takes {','.join(families)}")
     want = lambda family: only is None or family in only
     for d in (DATA, TASKS):
         d.mkdir(exist_ok=True)
+    for stale in [*DATA.glob("*.jsonl"), *TASKS.glob("*.yaml")]:  # sets written by an earlier run
+        stale.unlink()
     (TASKS / "_mc_template_yaml").write_text(MC_TEMPLATE, encoding="utf-8")
     (TASKS / "_gen_template_yaml").write_text(GEN_TEMPLATE, encoding="utf-8")
     mc_tasks, gen_tasks, sets, pairs = [], [], {}, []
@@ -387,50 +380,27 @@ def main():
         sets[name] = dict(meta, task=f"lga_{name}", questions=len(test))
 
     print("multiple-choice sets")
-    gm_langs = ["ar", "zh", "tr", "ko", "it", "pt", "vi", "sw", "id"]
-    if want("globalmmlu"):
-        for lang in gm_langs:
-            mc(f"globalmmlu_{lang}", "Global-MMLU", "translated", lang, lambda s, l=lang: global_mmlu(l, s))
-    for family, name, bench, lang, loader in (
+    archive = m3exam_zip(args.m3exam_zip) if want("m3exam") else None
+    for family, name, bench, lang, loader in (  # each paired with Global-MMLU in the same language
             ("arabicmmlu", "arabicmmlu_ar", "ArabicMMLU", "ar", arabicmmlu),
             ("cmmlu", "cmmlu_zh", "CMMLU", "zh", cmmlu),
             ("turkishmmlu", "turkishmmlu_tr", "TurkishMMLU", "tr", turkishmmlu),
-            ("kmmlu", "kmmlu_ko", "KMMLU", "ko", kmmlu)):
+            ("kmmlu", "kmmlu_ko", "KMMLU", "ko", kmmlu),
+            *(("m3exam", f"m3exam_{lang}", "M3Exam", lang, lambda s, l=lang: m3exam(l, s, archive))
+              for lang in M3EXAM_LANGS),
+            ("seaexam", "seaexam_native_id", "SeaExam native Indonesian exams (stand-in for SEACrowd)", "id",
+             lambda s: seaexam("m3exam-indonesian", s))):
         if want(family):
             mc(name, bench, "native", lang, loader)
+            mc(f"globalmmlu_{lang}", "Global-MMLU", "translated", lang, lambda s, l=lang: global_mmlu(l, s))
             pairs.append({"native": name, "translated": [f"globalmmlu_{lang}"], "language": lang,
                           "pair": f"{bench} vs Global-MMLU"})
-    if want("m3exam"):
-        archive = m3exam_zip(args.m3exam_zip)
-        for lang in M3EXAM_LANGS:
-            mc(f"m3exam_{lang}", "M3Exam", "native", lang, lambda s, l=lang: m3exam(l, s, archive))
-    if want("seaexam"):
-        mc("seaexam_native_id", "SeaExam (native exams)", "native", "id", lambda s: seaexam("m3exam-indonesian", s))
-        for lang, config in (("zh", "mmlu-chinese"), ("vi", "mmlu-vietnamese"), ("th", "mmlu-thai"), ("id", "mmlu-indonesian")):
-            mc(f"seaexam_mmlu_{lang}", "SeaExam MMLU (Google-translated)", "translated", lang,
-               lambda s, c=config: seaexam(c, s))
-    if want("mmluprox"):
-        mc("mmluprox_af", "MMLU-ProX", "translated", "af", lambda s: mmlu_prox("af", s))
-    if want("m3exam"):
-        translated_for = {"zh": ["globalmmlu_zh", "seaexam_mmlu_zh"], "it": ["globalmmlu_it"], "pt": ["globalmmlu_pt"],
-                          "vi": ["globalmmlu_vi", "seaexam_mmlu_vi"], "th": ["seaexam_mmlu_th"], "sw": ["globalmmlu_sw"],
-                          "af": ["mmluprox_af"]}
-        for lang, translated in translated_for.items():
-            pairs.append({"native": f"m3exam_{lang}", "translated": translated, "language": lang,
-                          "pair": "M3Exam vs translated MMLU"})
-    if want("seaexam"):
-        pairs.append({"native": "seaexam_native_id", "translated": ["seaexam_mmlu_id", "globalmmlu_id"], "language": "id",
-                      "pair": "SeaExam native vs translated MMLU (Southeast Asian stand-in for SEACrowd)"})
     if want("farstail"):
         mc("farstail_fa", "FarsTail", "native", "fa", farstail)
         mc("parsinlu_translated_fa", "ParsiNLU entailment (MNLI machine-translated)", "translated", "fa",
            lambda s: parsinlu("translation", s))
-        mc("parsinlu_natural_fa", "ParsiNLU entailment (natively written)", "native", "fa", lambda s: parsinlu("natural", s))
         pairs.append({"native": "farstail_fa", "translated": ["parsinlu_translated_fa"], "language": "fa",
                       "pair": "FarsTail vs translated Persian NLI"})
-        pairs.append({"native": "parsinlu_natural_fa", "translated": ["parsinlu_translated_fa"], "language": "fa",
-                      "pair": "ParsiNLU natural vs translated (same dataset)"})
-    pairs = [p for p in pairs if p["native"] in sets and all(t in sets for t in p["translated"])]
 
     multiloko = {}
     if not args.skip_multiloko:
@@ -438,7 +408,7 @@ def main():
         repo, ml_sets = multiloko_sets(args.multiloko_repo)
         for (language, kind), (key, rows) in sorted(ml_sets.items()):
             name = f"multiloko_{language}_{kind}"
-            meta = {"benchmark": "MultiLoKo", "role": "native" if kind == "local" else f"translated_{kind}",
+            meta = {"benchmark": "MultiLoKo", "role": "native" if kind == "local" else "translated",
                     "language": language, "multiloko_key": key}
             gen_tasks.append(write_set(name, meta, rows, None, "_gen_template_yaml"))
             sets[name] = dict(meta, task=f"lga_{name}", questions=len(rows))
@@ -454,8 +424,8 @@ def main():
     (DATA / "manifest.json").write_text(json.dumps(
         {"cap": args.cap, "seed": args.seed, "sets": sets, "pairs": pairs, "multiloko": multiloko},
         indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"\n{len(mc_tasks)} multiple-choice sets, {len(gen_tasks)} MultiLoKo sets, {len(pairs)} pairs;"
-          f" manifest at {DATA / 'manifest.json'}")
+    print(f"\n{len(mc_tasks)} multiple-choice sets ({len(pairs)} native/translated pairs), {len(gen_tasks)} MultiLoKo"
+          f" sets ({len(gen_tasks) // 2} languages, local and translated); manifest at {DATA / 'manifest.json'}")
 
 
 if __name__ == "__main__":
