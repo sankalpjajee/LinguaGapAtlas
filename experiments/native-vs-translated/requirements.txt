@@ -9,4 +9,6 @@ jinja2
 # MultiLoKo's eval.py
 sacrebleu
 editdistance
+# run_claude.py (Claude through the Anthropic API)
+anthropic>=2.0
 # Optional, several times faster: pip install vllm, then run with BACKEND=vllm

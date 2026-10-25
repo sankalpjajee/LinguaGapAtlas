@@ -36,11 +36,18 @@ Notes:
 | --- | --- |
 | `CohereLabs/aya-expanse-8b` | Instruction-tuned, 23 languages. Gated: accept its licence on the Hub and set `HF_TOKEN`. |
 | `marin-community/marin-8b-multilingual-base` | Base model. The Hub page has no model card, so cite Marin's own documentation for its training data. |
+| `claude-haiku-5-5` | Claude Haiku 5.5, through the Anthropic API with `run_claude.py`; `run.sh` skips it (marked `api=anthropic`). |
 
-Both models are scored the same way:
+The two open models are scored the same way:
 
 - **Multiple-choice sets:** 5-shot, with the examples taken from the same benchmark, and no chat template. This is the usual setting for comparing a base model with an instruction-tuned one.
 - **MultiLoKo:** its own 5-shot prompt templates.
+
+**Claude gets the same prompts but is scored differently.** `run_claude.py` sends each 5-shot prompt exactly as lm-eval builds it for the open models (same five examples, same seeds), after a one-line system instruction, with thinking off. The API returns no token log-probabilities, so Claude can't be scored by the log-likelihood of each option letter:
+- **Multiple choice:** Claude generates the answer letter. Structured output restricts it to the question's options.
+- **MultiLoKo:** Claude generates a short answer, cut at the first line break, as the open models' answers are.
+
+Each model's own native-vs-translated gaps compare like with like. Differences between Claude and an open model mix two scoring methods, so the report counts those comparisons separately and the table captions say so.
 
 ## Run
 
@@ -74,6 +81,20 @@ python analyze.py                            # after both tasks finish
 - **Free GPU memory:** run each model on a GPU nothing else is using. lm-eval's `auto` batch size takes what is free, so a shared GPU makes the run much slower. Check with `nvidia-smi`.
 - `python prepare.py --cap 3000` limits every multiple-choice set to 3,000 test questions, stratified by subject. That cuts the multiple-choice part to about a fifth. The gap intervals of the large pairs widen to roughly ±3 points.
 - `python prepare.py --only m3exam,farstail --skip-multiloko` builds only the named native benchmarks, each with its translated pair.
+
+**Claude (Anthropic API).** Needs `pip install anthropic` and an API key in `ANTHROPIC_API_KEY`. No GPU is needed: lm-eval only builds the prompts, a few minutes on 8 processes.
+
+```bash
+python run_claude.py --limit 5           # smoke test: 5 questions per set, about a cent
+python run_claude.py                     # everything: prints the estimated cost and asks first
+python run_claude.py --status            # progress of the submitted batches
+python analyze.py
+```
+
+- **Batches.** Requests go through the Message Batches API at half price. Batches usually finish within an hour and always within 24.
+- **Resuming.** If the script is stopped, run the same command again. It collects finished batches, resubmits failed requests, and never pays twice for a saved answer.
+- **Running unattended.** Use `--yes` to submit without asking, for example under `nohup`.
+- **Cost.** About 125M input tokens for everything, measured with a multilingual tokenizer, which comes to roughly $7–10 at Claude Haiku 5.5's batch prices.
 
 **Scale.** Each model scores 165,535 multiple-choice questions and generates 15,000 MultiLoKo answers. Most of the questions come from two sources: the seven Global-MMLU sets, at 14,042 questions each, and KMMLU, at 35,030. The sample logs that `analyze.py` reads take a few GB per model, because lm-eval stores every prompt. Run time has not been measured on a GPU. Use the `--limit 5` smoke test to estimate it on your hardware.
 
@@ -125,13 +146,16 @@ Positive means the translated set underestimates the model; negative means it ov
 - `report.md`: everything above.
 - `pairs.csv`, `comparisons.csv`, `multiloko.csv`: the same numbers, one row per model and pair, per model comparison, and per model and language.
 - `table_mc.tex`, `table_multiloko.tex`: tables ready for the paper, rewritten on every run, so regenerate them rather than edit them. They need `booktabs`, which `acmart` loads, and fit the full text width of ACM's two-column format (`table*`).
+- `table_comparisons.tex`: with three models or more, the model comparison for each pair of models, which `table_mc.tex` holds when there are two.
 
 ## Tested
 
-The pipeline was tested with lm-eval 0.4.13 in three ways:
+The pipeline was tested with lm-eval 0.4.13 in these ways:
 - lm-eval's dummy model on all 76 tasks;
 - a 135M-parameter model on CPU on all 76 tasks, covering both multiple choice and generation;
 - planted correct and incorrect answers on every question, whose gaps, ranking reversals and MultiLoKo scores the analysis recovered exactly;
-- synthetic models with chosen accuracies, for which the model comparison reported a clear same ranking, a clear reversal and a small-sample near-tie each as expected.
+- synthetic models with chosen accuracies, for which the model comparison reported a clear same ranking, a clear reversal and a small-sample near-tie each as expected;
+- `run_claude.py`'s prompts, which were identical to lm-eval's logged prompts for the first 20 questions of all 76 sets (1,520 prompts);
+- `run_claude.py`'s batch handling, run against a stand-in for the API client that failed, expired and refused some requests. It covered submission, retries, resuming, the written results, a request rejected at the preflight check (nothing submitted) and a batch rejected as invalid (nothing written). It has not been run against the real API from here.
 
 The two 8B models were run on 2× H100. Their multiple-choice runs used an earlier version of the task list, with 29 sets, which contains these 16 sets with identical questions and prompts.

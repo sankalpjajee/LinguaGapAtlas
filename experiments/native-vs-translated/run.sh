@@ -25,6 +25,7 @@ grep -v '^#' "$models" | tail -n +2 | tr '\t' '|' | while IFS='|' read -r model 
   [ -z "$model" ] && continue
   n=$((n + 1))
   if [ -n "${ONLY:-}" ] && [ "$n" != "$ONLY" ]; then continue; fi
+  case "$extra" in *api=*) echo "skipping $model: an API model, run with run_claude.py"; continue ;; esac
   for group in $task_groups; do
     [ -f "tasks/$group.yaml" ] || { echo "skipping $group: not prepared"; continue; }
     if [ "$group" = lga_multiloko ]; then batch=${GEN_BATCH_SIZE:-16}; else batch=${BATCH_SIZE:-auto}; fi

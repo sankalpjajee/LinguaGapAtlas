@@ -3,7 +3,7 @@
 
 Reads the lm-eval sample logs under results/ (run.sh writes them with
 --log_samples) and data/manifest.json (written by prepare.py), and writes
-analysis/report.md, pairs.csv, comparisons.csv and multiloko.csv.
+analysis/report.md, pairs.csv, comparisons.csv, multiloko.csv and LaTeX tables.
 
 Multiple-choice pairs. For each model, accuracy on the native set and on its
 translated set, raw and chance-corrected per question ((acc - chance) /
@@ -48,28 +48,32 @@ SEMICOLON = re.compile(r"[;；]")
 
 
 def load_samples(root):
-    """-> {task: {model: {question_id: sample}}}. For each model and task, keeps the
-    newest complete run. A --limit run (a smoke test) is used only when there is no
-    complete run, so a pilot never replaces full results, whenever it ran."""
-    limited, best = {}, {}
+    """-> ({task: {model: {question_id: sample}}}, models scored by generated answers).
+    For each model and task, keeps the newest complete run. A --limit run (a smoke
+    test) is used only when there is no complete run, so a pilot never replaces full
+    results, whenever it ran. Each run's results_<stamp>.json records its --limit
+    and, for run_claude.py, that answers were generated rather than scored by
+    log-likelihood."""
+    configs, best = {}, {}
     for f in Path(root).rglob("samples_lga_*.jsonl"):
         model = f.parent.name
         task, stamp = f.name[len("samples_"):-len(".jsonl")].rsplit("_", 1)  # samples_<task>_<stamp>.jsonl
-        if (f.parent, stamp) not in limited:  # the run's results_<stamp>.json records its --limit
+        if (f.parent, stamp) not in configs:
             run = f.parent / f"results_{stamp}.json"
-            config = json.loads(run.read_text(encoding="utf-8")).get("config", {}) if run.exists() else {}
-            limited[(f.parent, stamp)] = config.get("limit") is not None
-        rank = (not limited[(f.parent, stamp)], stamp)
+            configs[(f.parent, stamp)] = json.loads(run.read_text(encoding="utf-8")).get("config", {}) if run.exists() else {}
+        rank = (configs[(f.parent, stamp)].get("limit") is None, stamp)
         if (model, task) not in best or rank > best[(model, task)][0]:
             best[(model, task)] = (rank, f)
-    out = defaultdict(dict)
-    for (model, task), (_, f) in best.items():
+    out, generated = defaultdict(dict), set()
+    for (model, task), ((_, stamp), f) in best.items():
         rows = (json.loads(line) for line in f.open(encoding="utf-8"))
         out[task][model] = {r["doc"]["id"]: r for r in rows}
+        if configs[(f.parent, stamp)].get("scoring") == "generated":
+            generated.add(model)
     pilots = sorted(f"{model}/{task}" for (model, task), ((complete, _), _) in best.items() if not complete)
     if pilots:
         print(f"warning: {len(pilots)} sets have only --limit (smoke-test) runs, e.g. {pilots[0]}")
-    return out
+    return out, generated
 
 
 def corrected(sample):
@@ -231,20 +235,29 @@ def mc_pairs(manifest, samples, reps, rng):
     return rows, comparisons, lines
 
 
-def summary(pair_rows, comparisons):
+def summary(pair_rows, comparisons, generated):
     lines = ["## Summary\n"]
     if pair_rows:
         lower = sum(r["gap_ci_high"] < 0 for r in pair_rows)
         higher = sum(r["gap_ci_low"] > 0 for r in pair_rows)
         lines.append(f"- Translated minus native, per model and pair: {lower + higher} of {len(pair_rows)} gaps are "
                      f"significant, {lower} lower on the translated set and {higher} higher.")
-    if comparisons:
-        reversed_ = sum(c["verdict"] == "ranking reverses" for c in comparisons)
-        weak = sum(c["verdict"] == "reverses, not significantly" for c in comparisons)
-        changed = sum(c["change_significant"] for c in comparisons)
-        lines.append(f"- Comparing models: the translated set reverses the ranking in {reversed_} of {len(comparisons)} "
-                     f"comparisons, significantly on both sets ({weak} more reverse in point estimates only), and "
-                     f"significantly changes the difference between the models in {changed}.")
+    mixed = lambda c: (c["ahead_on_native"] in generated) != (c["other"] in generated)
+    for label, group in (("Comparing models scored the same way", [c for c in comparisons if not mixed(c)]),
+                         ("Comparing models scored differently", [c for c in comparisons if mixed(c)])):
+        if group:
+            reversed_ = sum(c["verdict"] == "ranking reverses" for c in group)
+            weak = sum(c["verdict"] == "reverses, not significantly" for c in group)
+            changed = sum(c["change_significant"] for c in group)
+            lines.append(f"- {label if generated else 'Comparing models'}: the translated set reverses the ranking in "
+                         f"{reversed_} of {len(group)} comparisons, significantly on both sets ({weak} more reverse in "
+                         f"point estimates only), and significantly changes the difference between the models in "
+                         f"{changed}.")
+    if generated:
+        lines.append(f"- {', '.join(sorted(generated))} answered by generating text, because its API returns no "
+                     "log-probabilities; the other models are scored by the log-likelihood of each option letter. Each "
+                     "model's own gaps compare like with like, but differences between models scored differently mix "
+                     "the two methods.")
     lines.append("- Each interval is a 95% bootstrap interval for one comparison, not corrected for multiple comparisons.\n")
     return lines
 
@@ -400,26 +413,76 @@ def tex_interval(x, lo, hi, star=False):
     return f"${100 * x:+.1f}{'^*' if star else ''}$ {{\\scriptsize[${100 * lo:+.1f}$,\\,${100 * hi:+.1f}$]}}"
 
 
-def latex_mc(manifest, pair_rows, comparisons, names):
-    """Table: per pair, each model's chance-corrected native and translated score and
-    the gap; with two models, also the difference between them on each set and how
-    it changes. Needs booktabs (acmart loads it)."""
-    present = {r["model"] for r in pair_rows}
-    models = [m for m in names if m in present] + sorted(present - set(names))
-    name = lambda m: tex(names.get(m, m))
-    by = {(r["native_set"], r["translated_set"], r["model"]): r for r in pair_rows}
-    pairs = list(dict.fromkeys((r["native_set"], r["translated_set"], r["language"]) for r in pair_rows))
+def ordered(names, present):
+    """Models in models.tsv order, then any others alphabetically."""
+    return [m for m in names if m in present] + sorted(present - set(names))
+
+
+def pair_rows_of(manifest, rows):
+    """The benchmark pairs in manifest order, with a label for each native set and the
+    translated sets that differ from the usual one (marked with a dagger)."""
+    pairs = list(dict.fromkeys((r["native_set"], r["translated_set"], r["language"]) for r in rows))
     label = lambda s: tex(TABLE_LABELS.get(s, manifest["sets"][s]["benchmark"].split(" (")[0]))
-    # Name only the native set; mark the rows whose translated set is not the usual one.
     usual = Counter(manifest["sets"][t]["benchmark"] for _, t, _ in pairs).most_common(1)[0][0]
     unusual = {t for _, t, _ in pairs if manifest["sets"][t]["benchmark"] != usual}
+    return pairs, label, usual, unusual
+
+
+def first_of(comparisons, a, b):
+    """Of models a and b, the one ahead on the native set in most pairs, so that the
+    differences shown are mostly positive."""
+    group = [c for c in comparisons if {c["ahead_on_native"], c["other"]} == {a, b}]
+    return a if 2 * sum(c["ahead_on_native"] == a for c in group) >= len(group) else b
+
+
+def difference_cells(comparisons, nat, tra, first, second):
+    """Native and translated difference, first minus second ($^*$ when the interval
+    excludes zero), and the change with its interval."""
+    c = next((c for c in comparisons if (c["native_set"], c["translated_set"]) == (nat, tra)
+              and {c["ahead_on_native"], c["other"]} == {first, second}), None)
+    if c is None:
+        return ["--"] * 3
+    s = 1 if c["ahead_on_native"] == first else -1
+    starred = lambda x, lo, hi: f"${100 * s * x:+.1f}{'^*' if lo > 0 or hi < 0 else ''}$"
+    lo, hi = sorted((s * c["change_ci_low"], s * c["change_ci_high"]))
+    return [starred(c["native_difference"], c["native_ci_low"], c["native_ci_high"]),
+            starred(c["translated_difference"], c["translated_ci_low"], c["translated_ci_high"]),
+            tex_interval(s * c["change"], lo, hi)]
+
+
+def scoring_note(models, names, generated):
+    """Caption sentence for multiple-choice tables with a model scored by generated answers."""
+    shown = [tex(names.get(m, m)) for m in models if m in generated]
+    if not shown:
+        return ""
+    note = f" {' and '.join(shown)} chose each letter by generating it, as its API returns no log-probabilities"
+    if len(shown) < len(models):
+        note += ("; the other models are scored by the log-likelihood of each option letter, so differences between "
+                 "models scored differently mix two methods")
+    return note + "."
+
+
+SETS_NOTE = (" Global-MMLU sets are human translations except ar (machine translation post-edited by professionals) and "
+             "tr (machine translation, partly edited by volunteers). SeaExam: its native Indonesian exams, standing in "
+             "for SEACrowd. ParsiNLU (MT): ParsiNLU entailment items machine-translated from MNLI.")
+
+
+def latex_mc(manifest, pair_rows, comparisons, names, generated):
+    """Table: per pair, each model's chance-corrected native and translated score and
+    the gap; with two models, also the difference between them on each set and how
+    it changes (with more, see latex_comparisons). Needs booktabs (acmart loads it)."""
+    models = ordered(names, {r["model"] for r in pair_rows})
+    name = lambda m: tex(names.get(m, m))
+    by = {(r["native_set"], r["translated_set"], r["model"]): r for r in pair_rows}
+    pairs, label, usual, unusual = pair_rows_of(manifest, pair_rows)
     two = len(models) == 2
-    if two:  # orient the difference so that it is positive in most native sets
-        first = models[0] if 2 * sum(c["ahead_on_native"] == models[0] for c in comparisons) >= len(comparisons) else models[1]
+    if two:
+        first = first_of(comparisons, *models)
         second = models[1] if first == models[0] else models[0]
     cols = "ll" + "rrr" * len(models) + ("rrr" if two else "")
+    spacing = 3 if len(models) + two < 3 else 2.5  # points between columns; tighter for three groups or more
     out = ["% Written by analyze.py from the runs under results/; regenerate rather than edit.",
-           "\\begin{table*}[t]", "\\centering", "\\footnotesize", "\\setlength{\\tabcolsep}{3pt}",
+           "\\begin{table*}[t]", "\\centering", "\\footnotesize", f"\\setlength{{\\tabcolsep}}{{{spacing}pt}}",
            f"\\begin{{tabular}}{{{cols}}}", "\\toprule"]
     head = " & & " + " & ".join(f"\\multicolumn{{3}}{{c}}{{{name(m)}}}" for m in models)
     rules = "".join(f"\\cmidrule(lr){{{3 + 3 * i}-{5 + 3 * i}}}" for i in range(len(models) + two))
@@ -435,17 +498,7 @@ def latex_mc(manifest, pair_rows, comparisons, names):
             cells += ([f"${100 * r['native_corrected']:.1f}$", f"${100 * r['translated_corrected']:.1f}$",  # may be < 0
                        tex_interval(r["gap_corrected"], r["gap_ci_low"], r["gap_ci_high"])] if r else ["--"] * 3)
         if two:
-            c = next((c for c in comparisons if (c["native_set"], c["translated_set"]) == (nat, tra)
-                      and {c["ahead_on_native"], c["other"]} == {first, second}), None)
-            if c:
-                s = 1 if c["ahead_on_native"] == first else -1
-                starred = lambda x, lo, hi: f"${100 * s * x:+.1f}{'^*' if lo > 0 or hi < 0 else ''}$"
-                lo, hi = sorted((s * c["change_ci_low"], s * c["change_ci_high"]))
-                cells += [starred(c["native_difference"], c["native_ci_low"], c["native_ci_high"]),
-                          starred(c["translated_difference"], c["translated_ci_low"], c["translated_ci_high"]),
-                          tex_interval(s * c["change"], lo, hi)]
-            else:
-                cells += ["--"] * 3
+            cells += difference_cells(comparisons, nat, tra, first, second)
         out.append(" & ".join(cells) + " \\\\")
     caption = ("Native and translated benchmarks in the same language, scored with the same harness and prompt. "
                "Scores are chance-corrected accuracy, $(\\mathit{acc}-\\mathit{chance})/(1-\\mathit{chance})$, in "
@@ -457,21 +510,59 @@ def latex_mc(manifest, pair_rows, comparisons, names):
     caption += f". Brackets: 95\\% bootstrap intervals over questions. The translated set is {tex(usual)} in the same language"
     if unusual:
         caption += "; for $^\\dagger$, " + ", ".join(sorted(label(t) for t in unusual))
-    caption += (". Global-MMLU sets are human translations except ar (machine translation post-edited by "
-                "professionals) and tr (machine translation, partly edited by volunteers). SeaExam: its native "
-                "Indonesian exams, standing in for SEACrowd. ParsiNLU (MT): ParsiNLU entailment items "
-                "machine-translated from MNLI.")
+    caption += "." + SETS_NOTE + scoring_note(models, names, generated)
     out += ["\\bottomrule", "\\end{tabular}", f"\\caption{{{caption}}}", "\\label{tab:native-vs-translated}",
             "\\end{table*}"]
     return "\n".join(out) + "\n"
 
 
-def latex_multiloko(ml_rows, names):
+def latex_comparisons(manifest, comparisons, names, generated):
+    """Table for three or more models: per benchmark pair and pair of models, how far
+    one model is ahead of the other on the native and on the translated set, and how
+    much that changes."""
+    models = ordered(names, {c["ahead_on_native"] for c in comparisons} | {c["other"] for c in comparisons})
+    short = {m: names.get(m, m).split()[0] for m in models}  # "Aya Expanse 8B" -> "Aya"
+    if len(set(short.values())) < len(short):
+        short = {m: names.get(m, m) for m in models}
+    duos = []
+    for i, a in enumerate(models):
+        for b in models[i + 1:]:
+            first = first_of(comparisons, a, b)
+            duos.append((first, b if first == a else a))
+    pairs, label, usual, unusual = pair_rows_of(manifest, comparisons)
+    out = ["% Written by analyze.py from the runs under results/; regenerate rather than edit.",
+           "\\begin{table*}[t]", "\\centering", "\\footnotesize",
+           f"\\setlength{{\\tabcolsep}}{{{3 if len(duos) < 3 else 2.5}pt}}",
+           f"\\begin{{tabular}}{{ll{'rrr' * len(duos)}}}", "\\toprule",
+           " & & " + " & ".join(f"\\multicolumn{{3}}{{c}}{{{tex(short[a])} $-$ {tex(short[b])}}}" for a, b in duos)
+           + " \\\\",
+           "".join(f"\\cmidrule(lr){{{3 + 3 * i}-{5 + 3 * i}}}" for i in range(len(duos))),
+           "Lang. & Native set" + " & Native & Transl. & Change" * len(duos) + " \\\\", "\\midrule"]
+    for nat, tra, lang in pairs:
+        cells = [lang, label(nat) + ("$^\\dagger$" if tra in unusual else "")]
+        for a, b in duos:
+            cells += difference_cells(comparisons, nat, tra, a, b)
+        out.append(" & ".join(cells) + " \\\\")
+    caption = ("How the translated set changes the comparison between models. For each pair of models, how far the "
+               "first is ahead of the second on the native and on the translated set, in chance-corrected points "
+               "($^*$: the 95\\% interval excludes zero), and how much that changes from the native to the translated "
+               f"set, with its 95\\% bootstrap interval. The translated set is {tex(usual)} in the same language")
+    if unusual:
+        caption += "; for $^\\dagger$, " + ", ".join(sorted(label(t) for t in unusual))
+    caption += "." + scoring_note(models, names, generated)
+    out += ["\\bottomrule", "\\end{tabular}", f"\\caption{{{caption}}}", "\\label{tab:model-comparisons}",
+            "\\end{table*}"]
+    return "\n".join(out) + "\n"
+
+
+def latex_multiloko(ml_rows, names, generated):
     """Table: per language and model, MultiLoKo exact match on local and on
     translated questions and the locality effect, with summary rows."""
-    present = {r["model"] for r in ml_rows}
-    models = [m for m in names if m in present] + sorted(present - set(names))
+    models = ordered(names, {r["model"] for r in ml_rows})
     by = {(r["model"], r["language"]): r for r in ml_rows}
+    wide = len(models) < 3  # with three models or more, intervals would not fit the page
+    effect = lambda r: (tex_interval(r["locality_effect"], r["le_ci_low"], r["le_ci_high"], r["differs_fdr5"]) if wide
+                        else f"${100 * r['locality_effect']:+.1f}{'^*' if r['differs_fdr5'] else ''}$")
     out = ["% Written by analyze.py from the runs under results/; regenerate rather than edit.",
            "\\begin{table*}[t]", "\\centering", "\\footnotesize", "\\setlength{\\tabcolsep}{3.5pt}",
            f"\\begin{{tabular}}{{l{'rrr' * len(models)}}}", "\\toprule",
@@ -483,13 +574,12 @@ def latex_multiloko(ml_rows, names):
         for m in models:
             r = by.get((m, language))
             cells += ([f"{100 * r['em_local']:.1f}", f"{100 * r['em_translated_human']:.1f}",
-                       tex_interval(r["locality_effect"], r["le_ci_low"], r["le_ci_high"], r["differs_fdr5"])]
-                      if r else ["--"] * 3)
+                       effect(r)] if r else ["--"] * 3)
         out.append(" & ".join(cells) + " \\\\")
     out.append("\\midrule")
-    differ, typical, mean = ["Languages that differ$^*$"], ["Typical difference, beyond noise"], ["Mean (shared shift)"]
-    tau, test, rho = ["SD across languages, beyond noise ($\\tau$)"], ["No language differs: $\\chi^2$; $p$"], \
-        ["Spearman $\\rho$, local vs transl."]
+    # Short labels and cells, so that three models fit the page; the caption explains them.
+    differ, typical, mean = ["Differ$^*$: under / over"], ["Typical difference"], ["Mean (shared shift)"]
+    tau, test, rho = ["Spread, $\\tau$"], ["No difference, $p$"], ["Spearman $\\rho$"]
     for m in models:
         rows = [r for r in ml_rows if r["model"] == m]
         les = np.array([r["locality_effect"] for r in rows])
@@ -497,23 +587,30 @@ def latex_multiloko(ml_rows, names):
         s = locality_summary(les, [r["le_se"] for r in rows])
         under = sum(r["differs_fdr5"] and r["locality_effect"] > 0 for r in rows)
         over = sum(r["differs_fdr5"] and r["locality_effect"] < 0 for r in rows)
-        differ += ["", "", f"{under + over} of {len(rows)}: {under} under, {over} over"]
+        differ += ["", "", f"{under} / {over}"]
         typical += ["", "", f"{100 * s['rms_beyond_noise']:.1f}"]
         mean += [f"{100 * np.mean(loc):.1f}", f"{100 * np.mean(hum):.1f}", f"${100 * s['mean']:+.1f}$"]
         tau += ["", "", f"{100 * s['tau']:.1f}"]
-        test += ["", "", f"{s['x2']:.1f}; ${p_text(s['x2_p']).replace(' ', '')}$"]
-        rho += ["", "", f"{spearman(loc, hum):.2f}" if len(rows) > 2 else "--"]
+        test += ["", "", "$<0.001$" if s["x2_p"] < 0.001 else f"{s['x2_p']:.3f}"]
+        rho += ["", "", f"${spearman(loc, hum):.2f}$" if len(rows) > 2 else "--"]
     out += [" & ".join(row) + " \\\\" for row in (differ, typical, mean, tau, test, rho)]
     caption = ("MultiLoKo exact match (\\%) on locally sourced questions and on English-sourced questions "
                "human-translated into the same language, scored with MultiLoKo's own evaluation script. Effect is "
                "local minus translated, MultiLoKo's locality effect: positive (under) means the translated set "
-               "underestimates the model, negative (over) that it overestimates it. Brackets: 95\\% bootstrap intervals "
-               "over questions. $^*$: the language differs at a false discovery rate of 5\\% (Benjamini--Hochberg). "
-               "Typical difference: the root mean square of the effects, with the variance that sampling noise alone "
-               "produces removed (each language has 250 questions per set); it combines the mean, a shift shared by "
-               "all languages, with $\\tau$, the spread across languages. The $\\chi^2$ test asks whether any language "
-               "differs at all. Answer lists that MultiLoKo's data stores as one semicolon-joined string, mostly in "
-               "the simplified Mandarin translations, were split before scoring.")
+               "underestimates the model, negative (over) that it overestimates it. "
+               + ("Brackets: 95\\% bootstrap intervals over questions. " if wide else "")
+               + "$^*$: the language differs at a false discovery rate of 5\\% (Benjamini--Hochberg); the first summary "
+               "row counts these languages, under and over. Typical difference: the root mean square of the effects, "
+               "with the variance that sampling noise alone produces removed (each language has 250 questions per set). "
+               "It combines the mean, a shift shared by all languages, with the spread $\\tau$, the SD of the effects "
+               "across languages beyond noise. No difference: $p$ of the $\\chi^2$ test that no language differs. "
+               "Spearman $\\rho$: rank correlation of the languages' local and translated scores. Answer lists that "
+               "MultiLoKo's data stores as one semicolon-joined string, mostly in the simplified Mandarin translations, "
+               "were split before scoring.")
+    chat = [tex(names.get(m, m)) for m in models if m in generated]
+    if chat:
+        caption += (f" {' and '.join(chat)} answered the same prompts through its chat API, after a one-line "
+                    "instruction to answer briefly.")
     out += ["\\bottomrule", "\\end{tabular}", f"\\caption{{{caption}}}", "\\label{tab:multiloko}", "\\end{table*}"]
     return "\n".join(out) + "\n"
 
@@ -536,7 +633,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
-    samples = load_samples(args.results)
+    samples, generated = load_samples(args.results)
     if not samples:
         sys.exit(f"no samples_lga_*.jsonl under {args.results}: run ./run.sh first")
     rng = np.random.default_rng(args.seed)
@@ -550,7 +647,7 @@ def main():
               "raw gap alone is not evidence of over- or understatement: read it together with the model "
               "comparison, which asks whether the translated set changes how the models compare, and with the "
               "MultiLoKo locality effect, which holds the benchmark fixed.\n"]
-    report += summary(pair_rows, comparisons) + ["## Multiple-choice pairs"] + pair_lines
+    report += summary(pair_rows, comparisons, generated) + ["## Multiple-choice pairs"] + pair_lines
     report += cs_ca(manifest, samples) + ml_lines
     (out / "report.md").write_text("\n".join(report) + "\n", encoding="utf-8")
     write_csv(out / "pairs.csv", pair_rows)
@@ -558,9 +655,13 @@ def main():
     write_csv(out / "multiloko.csv", ml_rows)
     names = model_names(args.models)
     if pair_rows:
-        (out / "table_mc.tex").write_text(latex_mc(manifest, pair_rows, comparisons, names), encoding="utf-8")
+        (out / "table_mc.tex").write_text(latex_mc(manifest, pair_rows, comparisons, names, generated),
+                                          encoding="utf-8")
+    if len({r["model"] for r in pair_rows}) > 2:  # with two models, table_mc.tex has the comparison
+        (out / "table_comparisons.tex").write_text(latex_comparisons(manifest, comparisons, names, generated),
+                                                   encoding="utf-8")
     if ml_rows:
-        (out / "table_multiloko.tex").write_text(latex_multiloko(ml_rows, names), encoding="utf-8")
+        (out / "table_multiloko.tex").write_text(latex_multiloko(ml_rows, names, generated), encoding="utf-8")
     print(f"wrote {out / 'report.md'} ({len(pair_rows)} pair rows, {len(comparisons)} model comparisons, "
           f"{len(ml_rows)} MultiLoKo rows)")
 
