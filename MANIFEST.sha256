@@ -12,8 +12,8 @@ ed9039135f5fbf6d254f23bf73a2ec122f37fdc9d3b81c2b30274068d5c2618b  ./data-diction
 b9e3a0fde16a25c575adda341b40656736d3f4a9de1e6819cccc2699e05b7d2f  ./data/corpus.csv
 f57b4366fd9f17a90ebfb9c0d524ce912583a5044f0e0cdeb420d2a15e9790ec  ./data/screening-log.csv
 b0b44c3232139dbec00987acd5d45e7f7d2c472a9774bc1e22c1210d29183697  ./experiments/native-vs-translated/.gitignore
-76a2c4727210c68ab6abeb1954f2a7f4154b045b0625ee859be01161c2239c41  ./experiments/native-vs-translated/README.md
-f5c190b2cc4ade64a1ebf63740b43c6b380bfc7fcfe545b0eb1bae86332b275b  ./experiments/native-vs-translated/analyze.py
+f3e0d751ebcb9ccb04ac0b38d4e5580ed31b46dfee0cfbcca444788f5ab7180d  ./experiments/native-vs-translated/README.md
+890caab04efb04bd5b8f1a046fd85d5c0121eeaae744da7414afdefc088fea29  ./experiments/native-vs-translated/analyze.py
 6ba7e963f877cc1e93ae354bb92dfc0767be9ef030e25735621466c62a47798e  ./experiments/native-vs-translated/models.tsv
 9d680fbff7dfb52e335249d94c6400d8250577de626186341d831ed8b14d4c6f  ./experiments/native-vs-translated/prepare.py
 1917edac5fa2a2fd2b1900aabb4ad807eadbbec2d1a2bf129bb16b6e3fafb471  ./experiments/native-vs-translated/requirements.txt

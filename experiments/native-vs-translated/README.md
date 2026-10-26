@@ -135,6 +135,12 @@ Positive means the translated set underestimates the model; negative means it ov
 
 **A fix to MultiLoKo's reference answers.** At the pinned commit, 158 of the 250 simplified Mandarin human translations store their accepted answers as one string joined by semicolons (`76；76年；…`), so no answer can match them; 3 other scored questions have the same problem. `analyze.py` scores against a copy in which those strings are split into separate answers, and the report says how many it split.
 
+**A check for answers given in English.** The translated questions were written in English. A model can answer one in English, for example with a name in Latin letters where the language's reference answers use its own script. Exact match counts that as wrong. So every model is scored a second time, with each question also accepting the answers of its English version:
+- for a local question, MultiLoKo's English translation of it;
+- for a translated question, the English original.
+
+The report gives the locality effect and its summary both ways ("+EN" in the table). For the languages whose reference answers are mostly in another script, 15 of the 30, it also gives how often each model answered in Latin letters, on local and on translated questions.
+
 **MultiLoKo summary, across languages:**
 - how many languages differ, at a 5% false discovery rate, and in which direction (starred in the table);
 - the typical size of the native–translated difference: the root mean square of the effects, with the variance that sampling noise alone produces removed (each language has only 250 questions per set);
@@ -154,6 +160,7 @@ The pipeline was tested with lm-eval 0.4.13 in these ways:
 - lm-eval's dummy model on all 76 tasks;
 - a 135M-parameter model on CPU on all 76 tasks, covering both multiple choice and generation;
 - planted correct and incorrect answers on every question, whose gaps, ranking reversals and MultiLoKo scores the analysis recovered exactly;
+- planted MultiLoKo answers given in English (the first answer of each question's English version), on translated questions only and on all questions. The first gave locality effects of +33 to +99 points; the English check brought every language's effect to zero for both;
 - synthetic models with chosen accuracies, for which the model comparison reported a clear same ranking, a clear reversal and a small-sample near-tie each as expected;
 - `run_claude.py`'s prompts, which were identical to lm-eval's logged prompts for the first 20 questions of all 76 sets (1,520 prompts);
 - `run_claude.py`'s batch handling, run against a stand-in for the API client that failed, expired and refused some requests. It covered submission, retries, resuming, the written results, a request rejected at the preflight check (nothing submitted) and a batch rejected as invalid (nothing written). It has not been run against the real API from here.

@@ -26,6 +26,10 @@ the language, as MultiLoKo defines it: positive means the translated set
 underestimates the model, negative means it overestimates it. Across languages
 the report gives the spread of that effect beyond sampling noise (see
 locality_summary), since its mean can be near zero when errors run both ways.
+As a check on answers given in English, every model is scored a second time with
+each question also accepting the answers of its English version, and for the
+languages written in other scripts the report gives the share of answers in
+Latin letters.
 
 Usage: python analyze.py [--results results] [--reps 2000] [--seed 0]
 """
@@ -37,6 +41,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -282,28 +287,58 @@ def cs_ca(manifest, samples):
     return lines
 
 
-def multiloko_reference(src, dst, subset):
+def jsonl(path):
+    with open(path, encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def multiloko_reference(src, dst, subset, english=False):
     """Copies the reference answers MultiLoKo's eval.py reads (<language>/<subset>.jsonl
     and <language>/<subset>_translated*.jsonl) from src to dst, splitting answer
     lists stored as one semicolon-joined string. At the pinned commit, 158 of the
     250 simplified Mandarin human translations store their answers that way, and
     as one string no prediction can match them. Returns {eval.py set key: number
-    of questions split}."""
+    of questions split}.
+
+    With english=True, each locally sourced and each human-translated question also
+    accepts the answers of its English version: MultiLoKo's English translation of a
+    local question (<language>/<subset>_translated_human_english.jsonl), and the
+    English original of a translated one (english/<subset>.jsonl). That checks for
+    answers given in English, such as a name in Latin letters where the language's
+    reference answers write it in its own script."""
+    answers = lambda targets: [p.strip() for t in targets for p in SEMICOLON.split(t) if p.strip()]
     split = Counter()
     for f in sorted(Path(src).glob(f"*/{subset}.jsonl")) + sorted(Path(src).glob(f"*/{subset}_translated*.jsonl")):
         key = f.stem.replace(subset, f.parent.name)  # eval.py's name for the set
+        version = None  # the English version, whose answers english=True also accepts
+        if english and f.parent.name != "english" and f.name == f"{subset}.jsonl":
+            version = f.parent / f"{subset}_translated_human_english.jsonl"
+        elif english and f.parent.name == "english" and f.name.startswith(f"{subset}_translated_human_"):
+            version = f.parent / f"{subset}.jsonl"
+        in_english = {r["id"]: answers(r["targets"]) for r in jsonl(version)} if version and version.exists() else {}
         out = Path(dst) / f.parent.name / f.name
         out.parent.mkdir(parents=True, exist_ok=True)
-        with f.open(encoding="utf-8") as fin, out.open("w", encoding="utf-8") as fout:
-            for line in fin:
-                if not line.strip():
-                    continue
-                row = json.loads(line)
+        with out.open("w", encoding="utf-8") as fout:
+            for row in jsonl(f):
                 if any(SEMICOLON.search(t) for t in row.get("targets", [])):
-                    row["targets"] = [p.strip() for t in row["targets"] for p in SEMICOLON.split(t) if p.strip()]
+                    row["targets"] = answers(row["targets"])
                     split[key] += 1
+                if row.get("id") in in_english:
+                    row["targets"] = row["targets"] + in_english[row["id"]]
                 fout.write(json.dumps(row, ensure_ascii=False) + "\n")
     return split
+
+
+def latin(text):
+    """Whether text is written in Latin letters; None if it has no letters (a number, say)."""
+    letters = [c for c in text if c.isalpha()]
+    return all(unicodedata.name(c, "").startswith("LATIN") for c in letters) if letters else None
+
+
+def share(flags):
+    """Share of True among flags, leaving out None; nan if none are left."""
+    flags = [f for f in flags if f is not None]
+    return float(np.mean(flags)) if flags else float("nan")
 
 
 def multiloko(manifest, samples, reps, rng):
@@ -312,47 +347,70 @@ def multiloko(manifest, samples, reps, rng):
     if not ml_sets or not info:
         return [], []
     models = sorted({m for s in ml_sets.values() for m in samples.get(s["task"], {})})
+    task = {s["multiloko_key"]: s["task"] for s in ml_sets.values()}
     rows, lines = [], ["\n## MultiLoKo: locally sourced vs English-sourced, human-translated questions\n"]
-    results = {}
+
+    def prediction(s):
+        text = s["filtered_resps"][0] if s.get("filtered_resps") else ""
+        return text if isinstance(text, str) else str(text)
+
+    results, results_en = {}, {}  # eval.py's scores, and with the English versions' answers also accepted
     with tempfile.TemporaryDirectory() as tmp:
-        reference = Path(tmp) / "reference"
+        reference, reference_en = Path(tmp) / "reference", Path(tmp) / "reference_en"
         split = multiloko_reference(info["data"], reference, info["subset"])
+        multiloko_reference(info["data"], reference_en, info["subset"], english=True)
         for m in models:
             preds, scores = Path(tmp) / "predictions.jsonl", Path(tmp) / "scores.json"
             with preds.open("w", encoding="utf-8") as f:
                 for meta in ml_sets.values():
                     for s in samples.get(meta["task"], {}).get(m, {}).values():
-                        text = s["filtered_resps"][0] if s.get("filtered_resps") else ""
                         f.write(json.dumps({"language": s["doc"]["multiloko_key"], "id": s["doc"]["id"],
-                                            "prediction": text if isinstance(text, str) else str(text)},
-                                           ensure_ascii=False) + "\n")
-            subprocess.run([sys.executable, str(Path(info["repo"]) / "eval.py"), "-d", str(reference),
-                            "-s", info["subset"], "-p", str(preds), "-o", str(scores)], check=True)
-            results[m] = json.loads(scores.read_text(encoding="utf-8"))
-    split = Counter({k: n for k, n in split.items() if k in {s["multiloko_key"] for s in ml_sets.values()}})
+                                            "prediction": prediction(s)}, ensure_ascii=False) + "\n")
+            for ref, out in ((reference, results), (reference_en, results_en)):
+                subprocess.run([sys.executable, str(Path(info["repo"]) / "eval.py"), "-d", str(ref),
+                                "-s", info["subset"], "-p", str(preds), "-o", str(scores)], check=True)
+                out[m] = json.loads(scores.read_text(encoding="utf-8"))
+    split = Counter({k: n for k, n in split.items() if k in task})
     if split:
         (top, n_top), = split.most_common(1)
         lines.append(f"In MultiLoKo's data, {sum(split.values())} of the questions scored here store their accepted "
                      f"answers as one semicolon-joined string ({n_top} of them in {top}). No answer could match such "
-                     "a string, so it is split into separate answers before scoring.")
-    for m, result in results.items():
+                     "a string, so it is split into separate answers before scoring.\n")
+    lines.append("Check for answers given in English: each model is scored again with each question also accepting the "
+                 "answers of its English version (MultiLoKo's English translation of a local question, the English "
+                 "original of a translated one). Exact match counts a correct answer given in English as wrong whenever "
+                 "the language's reference answers write it differently, such as a name in Latin letters where they use "
+                 "the language's own script, and English-sourced questions invite such answers more than local ones. "
+                 "For the languages whose reference answers are mostly in another script, the report also gives the "
+                 "share of answers in Latin letters.")
+    for m in models:
 
-        def em(key):
-            per = [v["em"] for k, v in result.get(key, {}).items() if isinstance(v, dict) and "em" in v]
-            return per
+        def em(result, key):
+            """{question id: exact match} in one set."""
+            return {i: v["em"] for i, v in result[m].get(key, {}).items() if isinstance(v, dict) and "em" in v}
 
+        se = lambda a, b: float(np.sqrt(np.var(a, ddof=1) / len(a) + np.var(b, ddof=1) / len(b)))
         per_lang = []
         for language in sorted({s["language"] for s in ml_sets.values()}):
-            local = em(language)
-            human = em(f"english_translated_human_{language}")
+            keys = (language, f"english_translated_human_{language}")
+            local, human = em(results, keys[0]), em(results, keys[1])
             if not local or not human:
                 continue
-            le = np.mean(local) - np.mean(human)
-            se = np.sqrt(np.var(local, ddof=1) / len(local) + np.var(human, ddof=1) / len(human))
-            lo, hi = ci(bootstrap_means(local, reps, rng) - bootstrap_means(human, reps, rng))
-            row = {"model": m, "language": language, "em_local": np.mean(local), "em_translated_human": np.mean(human),
-                   "locality_effect": le, "le_se": se, "le_ci_low": lo, "le_ci_high": hi,
-                   "n_local": len(local), "n_human": len(human)}
+            local_en, human_en = em(results_en, keys[0]), em(results_en, keys[1])
+            l, h = list(local.values()), list(human.values())
+            l_en, h_en = [local_en[i] for i in local], [human_en[i] for i in human]
+            lo, hi = ci(bootstrap_means(l, reps, rng) - bootstrap_means(h, reps, rng))
+            runs = [samples.get(task[k], {}).get(m, {}).values() for k in keys]
+            answers = [[latin(prediction(s)) for s in run] for run in runs]
+            references = [[latin(t) for s in run for t in s["doc"]["targets"]] for run in runs]
+            row = {"model": m, "language": language, "em_local": np.mean(l), "em_translated_human": np.mean(h),
+                   "locality_effect": np.mean(l) - np.mean(h), "le_se": se(l, h), "le_ci_low": lo, "le_ci_high": hi,
+                   "n_local": len(l), "n_human": len(h), "differs_fdr5": False,
+                   "em_local_en": np.mean(l_en), "em_translated_en": np.mean(h_en),
+                   "locality_effect_en": np.mean(l_en) - np.mean(h_en), "le_en_se": se(l_en, h_en),
+                   "differs_en_fdr5": False, "other_script": share(references[0] + references[1]) < 0.5,
+                   "latin_answers_local": share(answers[0]), "latin_answers_translated": share(answers[1]),
+                   "latin_reference_local": share(references[0]), "latin_reference_translated": share(references[1])}
             rows.append(row)
             per_lang.append(row)
         if not per_lang:
@@ -362,10 +420,15 @@ def multiloko(manifest, samples, reps, rng):
         hum = np.array([r["em_translated_human"] for r in per_lang])
         rho = spearman(loc, hum) if len(per_lang) > 2 else float("nan")
         s = locality_summary(les, [r["le_se"] for r in per_lang])
-        for r, differs in zip(per_lang, s["differs"]):
-            r["differs_fdr5"] = bool(differs)
+        s_en = locality_summary([r["locality_effect_en"] for r in per_lang], [r["le_en_se"] for r in per_lang])
+        for r, differs, differs_en in zip(per_lang, s["differs"], s_en["differs"]):
+            r["differs_fdr5"], r["differs_en_fdr5"] = bool(differs), bool(differs_en)
         under = sum(r["differs_fdr5"] and r["locality_effect"] > 0 for r in per_lang)
         over = sum(r["differs_fdr5"] and r["locality_effect"] < 0 for r in per_lang)
+        under_en = sum(r["differs_en_fdr5"] and r["locality_effect_en"] > 0 for r in per_lang)
+        over_en = sum(r["differs_en_fdr5"] and r["locality_effect_en"] < 0 for r in per_lang)
+        other = [r for r in per_lang if r["other_script"]]
+        mean_of = lambda rs, key: 100 * float(np.nanmean([r[key] for r in rs]))
         lines.append(f"\n### {m}\n")
         lines.append(f"- Languages: {len(per_lang)}. Mean EM: local {pct(loc.mean())}, translated {pct(hum.mean())}.")
         lines.append(f"- Native vs translated: {under + over} of {len(per_lang)} languages differ (false discovery rate "
@@ -379,13 +442,30 @@ def multiloko(manifest, samples, reps, rng):
                      f"{s['q']:.1f} on {s['q_df']} df, {p_text(s['q_p'])}).")
         lines.append(f"- Range {100 * les.min():+.1f} to {100 * les.max():+.1f} points; {int((les > 0).sum())} languages "
                      f"positive, {int((les < 0).sum())} negative; {int((np.abs(les) >= 0.10).sum())} with |effect| ≥ 10.")
-        lines.append(f"- Rank correlation of language difficulty, local vs translated: {rho:.2f}.\n")
-        lines.append("| Language | Local EM | Translated EM | Locality effect [95% CI] |")
-        lines.append("|---|---|---|---|")
+        lines.append(f"- Rank correlation of language difficulty, local vs translated: {rho:.2f}.")
+        lines.append(f"- With English answers also accepted: {under_en + over_en} of {len(per_lang)} languages differ "
+                     f"({under_en} under, {over_en} over); typical difference {100 * s_en['rms_beyond_noise']:.1f} points "
+                     f"beyond noise, mean {100 * s_en['mean']:+.1f}, spread τ {100 * s_en['tau']:.1f}. Accepting them "
+                     f"raises exact match by {mean_of(per_lang, 'em_local_en') - mean_of(per_lang, 'em_local'):.1f} "
+                     f"points on local questions and "
+                     f"{mean_of(per_lang, 'em_translated_en') - mean_of(per_lang, 'em_translated_human'):.1f} on "
+                     "translated ones, on average across languages.")
+        if other:
+            lines.append(f"- Answers in Latin letters, in the {len(other)} languages whose reference answers are mostly in "
+                         f"another script: {mean_of(other, 'latin_answers_local'):.1f}% on local questions and "
+                         f"{mean_of(other, 'latin_answers_translated'):.1f}% on translated ones, on average; of the "
+                         f"reference answers, {mean_of(other, 'latin_reference_local'):.1f}% and "
+                         f"{mean_of(other, 'latin_reference_translated'):.1f}%.")
+        lines.append("\n| Language | Local EM | Translated EM | Locality effect [95% CI] | English also accepted "
+                     "| Answers in Latin letters, local / translated |")
+        lines.append("|---|---|---|---|---|---|")
         for r in sorted(per_lang, key=lambda r: r["locality_effect"]):
+            letters = (f"{pct(r['latin_answers_local'])} / {pct(r['latin_answers_translated'])}" if r["other_script"]
+                       else "–")
             lines.append(f"| {r['language']} | {pct(r['em_local'])} | {pct(r['em_translated_human'])} | "
                          f"{100 * r['locality_effect']:+.1f}{'*' if r['differs_fdr5'] else ''} "
-                         f"[{100 * r['le_ci_low']:+.1f}, {100 * r['le_ci_high']:+.1f}] |")
+                         f"[{100 * r['le_ci_low']:+.1f}, {100 * r['le_ci_high']:+.1f}] | "
+                         f"{100 * r['locality_effect_en']:+.1f}{'*' if r['differs_en_fdr5'] else ''} | {letters} |")
     return rows, lines
 
 
@@ -557,24 +637,26 @@ def latex_comparisons(manifest, comparisons, names, generated):
 
 def latex_multiloko(ml_rows, names, generated):
     """Table: per language and model, MultiLoKo exact match on local and on
-    translated questions and the locality effect, with summary rows."""
+    translated questions, the locality effect, and the effect with English answers
+    also accepted, with summary rows."""
     models = ordered(names, {r["model"] for r in ml_rows})
     by = {(r["model"], r["language"]): r for r in ml_rows}
     wide = len(models) < 3  # with three models or more, intervals would not fit the page
+    starred = lambda x, star: f"${100 * x:+.1f}{'^*' if star else ''}$"
     effect = lambda r: (tex_interval(r["locality_effect"], r["le_ci_low"], r["le_ci_high"], r["differs_fdr5"]) if wide
-                        else f"${100 * r['locality_effect']:+.1f}{'^*' if r['differs_fdr5'] else ''}$")
+                        else starred(r["locality_effect"], r["differs_fdr5"]))
     out = ["% Written by analyze.py from the runs under results/; regenerate rather than edit.",
            "\\begin{table*}[t]", "\\centering", "\\footnotesize", "\\setlength{\\tabcolsep}{3.5pt}",
-           f"\\begin{{tabular}}{{l{'rrr' * len(models)}}}", "\\toprule",
-           " & " + " & ".join(f"\\multicolumn{{3}}{{c}}{{{tex(names.get(m, m))}}}" for m in models) + " \\\\",
-           "".join(f"\\cmidrule(lr){{{2 + 3 * i}-{4 + 3 * i}}}" for i in range(len(models))),
-           "Language" + " & Local & Transl. & Effect" * len(models) + " \\\\", "\\midrule"]
+           f"\\begin{{tabular}}{{l{'rrrr' * len(models)}}}", "\\toprule",
+           " & " + " & ".join(f"\\multicolumn{{4}}{{c}}{{{tex(names.get(m, m))}}}" for m in models) + " \\\\",
+           "".join(f"\\cmidrule(lr){{{2 + 4 * i}-{5 + 4 * i}}}" for i in range(len(models))),
+           "Language" + " & Local & Transl. & Effect & +EN" * len(models) + " \\\\", "\\midrule"]
     for language in sorted({r["language"] for r in ml_rows}):
         cells = [tex(language.replace("_", " ").title())]
         for m in models:
             r = by.get((m, language))
-            cells += ([f"{100 * r['em_local']:.1f}", f"{100 * r['em_translated_human']:.1f}",
-                       effect(r)] if r else ["--"] * 3)
+            cells += ([f"{100 * r['em_local']:.1f}", f"{100 * r['em_translated_human']:.1f}", effect(r),
+                       starred(r["locality_effect_en"], r["differs_en_fdr5"])] if r else ["--"] * 4)
         out.append(" & ".join(cells) + " \\\\")
     out.append("\\midrule")
     # Short labels and cells, so that three models fit the page; the caption explains them.
@@ -582,29 +664,42 @@ def latex_multiloko(ml_rows, names, generated):
     tau, test, rho = ["Spread, $\\tau$"], ["No difference, $p$"], ["Spearman $\\rho$"]
     for m in models:
         rows = [r for r in ml_rows if r["model"] == m]
-        les = np.array([r["locality_effect"] for r in rows])
-        loc, hum = [r["em_local"] for r in rows], [r["em_translated_human"] for r in rows]
-        s = locality_summary(les, [r["le_se"] for r in rows])
-        under = sum(r["differs_fdr5"] and r["locality_effect"] > 0 for r in rows)
-        over = sum(r["differs_fdr5"] and r["locality_effect"] < 0 for r in rows)
-        differ += ["", "", f"{under} / {over}"]
-        typical += ["", "", f"{100 * s['rms_beyond_noise']:.1f}"]
-        mean += [f"{100 * np.mean(loc):.1f}", f"{100 * np.mean(hum):.1f}", f"${100 * s['mean']:+.1f}$"]
-        tau += ["", "", f"{100 * s['tau']:.1f}"]
-        test += ["", "", "$<0.001$" if s["x2_p"] < 0.001 else f"{s['x2_p']:.3f}"]
-        rho += ["", "", f"${spearman(loc, hum):.2f}$" if len(rows) > 2 else "--"]
+        summary = {}  # the summary cells under Effect ("own") and under +EN ("en")
+        for col, eff, se, differs, local, translated in (
+                ("own", "locality_effect", "le_se", "differs_fdr5", "em_local", "em_translated_human"),
+                ("en", "locality_effect_en", "le_en_se", "differs_en_fdr5", "em_local_en", "em_translated_en")):
+            s = locality_summary([r[eff] for r in rows], [r[se] for r in rows])
+            under = sum(r[differs] and r[eff] > 0 for r in rows)
+            over = sum(r[differs] and r[eff] < 0 for r in rows)
+            rank = spearman([r[local] for r in rows], [r[translated] for r in rows]) if len(rows) > 2 else None
+            summary[col] = {"differ": f"{under} / {over}", "typical": f"{100 * s['rms_beyond_noise']:.1f}",
+                            "mean": f"${100 * s['mean']:+.1f}$", "tau": f"{100 * s['tau']:.1f}",
+                            "test": "$<0.001$" if s["x2_p"] < 0.001 else f"{s['x2_p']:.3f}",
+                            "rho": "--" if rank is None else f"${rank:.2f}$"}
+        own, en = summary["own"], summary["en"]
+        differ += ["", "", own["differ"], en["differ"]]
+        typical += ["", "", own["typical"], en["typical"]]
+        mean += [f"{100 * np.mean([r['em_local'] for r in rows]):.1f}",
+                 f"{100 * np.mean([r['em_translated_human'] for r in rows]):.1f}", own["mean"], en["mean"]]
+        tau += ["", "", own["tau"], en["tau"]]
+        test += ["", "", own["test"], en["test"]]
+        rho += ["", "", own["rho"], en["rho"]]
     out += [" & ".join(row) + " \\\\" for row in (differ, typical, mean, tau, test, rho)]
     caption = ("MultiLoKo exact match (\\%) on locally sourced questions and on English-sourced questions "
                "human-translated into the same language, scored with MultiLoKo's own evaluation script. Effect is "
                "local minus translated, MultiLoKo's locality effect: positive (under) means the translated set "
-               "underestimates the model, negative (over) that it overestimates it. "
+               "underestimates the model, negative (over) that it overestimates it. +EN: the same effect when each "
+               "question also accepts the answers of its English version (MultiLoKo's English translation of a local "
+               "question, the English original of a translated one), a check on answers given in English rather than "
+               "in the language's own script. "
                + ("Brackets: 95\\% bootstrap intervals over questions. " if wide else "")
                + "$^*$: the language differs at a false discovery rate of 5\\% (Benjamini--Hochberg); the first summary "
                "row counts these languages, under and over. Typical difference: the root mean square of the effects, "
                "with the variance that sampling noise alone produces removed (each language has 250 questions per set). "
                "It combines the mean, a shift shared by all languages, with the spread $\\tau$, the SD of the effects "
                "across languages beyond noise. No difference: $p$ of the $\\chi^2$ test that no language differs. "
-               "Spearman $\\rho$: rank correlation of the languages' local and translated scores. Answer lists that "
+               "Spearman $\\rho$: rank correlation of the languages' local and translated scores. Summary values under "
+               "+EN are computed in the same way from the scores with English answers accepted. Answer lists that "
                "MultiLoKo's data stores as one semicolon-joined string, mostly in the simplified Mandarin translations, "
                "were split before scoring.")
     chat = [tex(names.get(m, m)) for m in models if m in generated]
