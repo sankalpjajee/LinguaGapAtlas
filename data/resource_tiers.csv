@@ -1,0 +1,93 @@
+resource_name,type,derived_tier,n_languages,n_high,n_medium,n_low
+FineWeb,Dataset,High,1,1,0,0
+FineWeb-Edu,Dataset,High,1,1,0,0
+FineWeb-2 (model-based data selection),Dataset,High,20,19,1,0
+HPLT,Dataset,High,75,42,30,3
+C4,Dataset,High,1,1,0,0
+CulturaX,Dataset,Medium,167,44,93,30
+MADLAD-400,Dataset,Low,418,43,95,280
+RedPajama,Dataset,High,5,5,0,0
+OpenWebText,Dataset,High,1,1,0,0
+OSCAR,Dataset,Medium,166,45,95,26
+ROOTS,Dataset,Medium,46,11,18,17
+IndicNLPSuite,Dataset,Medium,12,3,8,1
+IndicCorp,Dataset,Medium,24,4,16,4
+IndicLLMSuite,Dataset,Medium,22,3,16,3
+Norwegian Colossal Corpus,Dataset,High,2,2,0,0
+SEA-PILE,Dataset,Medium,10,5,5,0
+Nepali pre-training corpus,Dataset,Medium,1,0,1,0
+UCCIX Irish corpus,Dataset,Medium,1,0,1,0
+SERENGETI,Dataset,Low,517,0,14,503
+African languages pre-training corpus (Oladipo et al.),Dataset,High,4,4,0,0
+CCMatrix,Dataset,High,38,31,6,1
+ParaCrawl,Dataset,High,24,21,3,0
+WikiMatrix,Dataset,Medium,85,38,40,7
+Europarl,Dataset,High,11,11,0,0
+OpenSubtitles,Dataset,High,60,39,16,5
+Tatoeba Translation Challenge,Dataset,Low,355,38,131,186
+Aya Dataset,Dataset,Medium,65,29,31,5
+Aya Collection,Dataset,Medium,114,41,56,17
+Bactrian-X,Dataset,High,52,30,19,3
+xP3,Dataset,Medium,46,11,18,17
+XQuAD,Benchmark,High,11,11,0,0
+MLQA,Benchmark,High,7,7,0,0
+BELEBELE,Benchmark,Medium,122,50,53,19
+Indic-QA,Benchmark,Medium,11,2,8,1
+ECLEKTIC,Benchmark,High,12,10,2,0
+TeQuAD,Dataset,Medium,1,0,1,0
+KenSwQuAD,Dataset,Medium,1,0,1,0
+FQuAD2.0,Dataset,High,1,1,0,0
+Global-MMLU,Benchmark,High,42,24,16,2
+IndicMMLU-Pro,Benchmark,Medium,9,3,5,1
+MMLU-ProX,Benchmark,High,29,18,10,1
+ArabicMMLU,Benchmark,High,1,1,0,0
+CMMLU,Benchmark,High,1,1,0,0
+TurkishMMLU,Benchmark,High,1,1,0,0
+KMMLU,Benchmark,High,1,1,0,0
+PAWS-X,Dataset,High,7,7,0,0
+m-ArenaHard,Benchmark,High,23,20,3,0
+MultiLoKo,Benchmark,High,31,25,6,0
+BenchMAX,Benchmark,High,17,14,3,0
+P-MMEval,Benchmark,High,10,10,0,0
+IrishQA,Dataset,Medium,2,1,1,0
+Irish MT-bench,Benchmark,Medium,1,0,1,0
+MultiBLiMP,Benchmark,Low,101,34,32,35
+BLiMP,Benchmark,High,1,1,0,0
+ZhoBLiMP,Benchmark,High,1,1,0,0
+TurBLiMP,Benchmark,High,1,1,0,0
+BLiMP-NL,Benchmark,High,1,1,0,0
+RuBLiMP,Benchmark,High,1,1,0,0
+JBLiMP,Benchmark,High,1,1,0,0
+DaLAJ,Dataset,High,1,1,0,0
+LINDSEA,Benchmark,Medium,2,1,1,0
+SyntaxGym,Benchmark,High,1,1,0,0
+XCOMPS,Benchmark,High,17,15,2,0
+XCOPA,Benchmark,High,11,7,3,1
+Winogrande,Benchmark,High,1,1,0,0
+SeaEval,Benchmark,High,8,6,2,0
+M3Exam,Benchmark,High,9,6,3,0
+ALM-bench,Benchmark,Medium,100,40,45,15
+SEACrowd,Benchmark,Low,37,3,8,26
+XNLI,Benchmark,High,15,14,1,0
+IndicXNLI,Benchmark,Medium,11,2,8,1
+FarsTail,Benchmark,High,1,1,0,0
+AmericasNLI,Benchmark,Low,10,0,3,7
+BasqueGLUE,Benchmark,High,1,1,0,0
+IndicGLUE,Benchmark,Medium,11,2,8,1
+IndicXTREME,Benchmark,Medium,20,3,16,1
+Nep-gLUE,Benchmark,Medium,1,0,1,0
+CLCTS,Benchmark,High,2,2,0,0
+XWikis,Benchmark,High,4,4,0,0
+CroCoSum,Benchmark,High,2,2,0,0
+WikiLingua,Benchmark,High,18,17,1,0
+MGSM,Benchmark,High,11,8,3,0
+MCLM,Benchmark,High,55,37,16,2
+MaXIFE,Benchmark,High,23,14,9,0
+XRAG,Benchmark,High,5,5,0,0
+mHumanEval,Benchmark,Low,204,34,75,95
+CL-HumanEval,Benchmark,High,2,2,0,0
+CIA Suite (RECON),Benchmark,High,6,4,2,0
+IndicGenBench,Benchmark,Medium,29,3,16,10
+ONERULER,Benchmark,High,26,23,2,1
+IrokoBench,Benchmark,Low,17,0,8,9
+BUFFET,Benchmark,High,54,21,18,15
